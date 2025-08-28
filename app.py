@@ -5,6 +5,29 @@ import json
 
 app = Flask(__name__)
 
+"""
+DevOps Webhook 服务器
+
+该应用提供了一个灵活的webhook处理系统，可以根据不同的路由配置将webhook事件转发到不同的目标URL。
+主要功能：
+1. 接收来自各种DevOps工具的webhook请求
+2. 根据配置将消息格式化为飞书卡片消息
+3. 根据路由选择对应的目标URL发送消息
+"""
+
+# 配置不同路由对应的目标URL
+# 格式: {'路由名称': '目标URL'}
+WEBHOOK_CONFIG = {
+    'vendor_bot': 'https://open.feishu.cn/open-apis/bot/v2/hook/2d1a1d9f-c5f0-444d-a65d-12ae2af8478e',
+    # 示例：添加更多的路由和对应的URL
+    'gitlab_pipeline': 'https://open.feishu.cn/open-apis/bot/v2/hook/example-gitlab-pipeline',
+    'jenkins_build': 'https://open.feishu.cn/open-apis/bot/v2/hook/example-jenkins-build',
+}
+
+# 全局配置，当路由没有配置对应的URL时使用
+# 可以通过环境变量或配置文件覆盖
+DEFAULT_TARGET_URL = WEBHOOK_CONFIG.get('vendor_bot', '')
+
 
 def format_duration(seconds):
     """
@@ -166,9 +189,18 @@ def send_formatted_message(target_url, message):
         raise Exception(f"Failed to send message. Status code: {response.status_code}, Response: {response.text}")
 
 
-# Webhook 路由
-@app.route('/vendor_bot', methods=['POST'])
-def handle_webhook():
+# 通用的webhook处理逻辑
+def process_webhook(request, route_name):
+    """
+    处理webhook请求的通用逻辑
+    
+    Args:
+        request: Flask请求对象
+        route_name: 路由名称，用于从配置中获取对应的目标URL
+    
+    Returns:
+        tuple: (Flask响应对象, HTTP状态码)
+    """
     if not request.is_json:
         return jsonify({"error": "Invalid JSON"}), 400
 
@@ -177,14 +209,35 @@ def handle_webhook():
         message = format_message(payload)
 
         if message:
-            # 目标连接 URL
-            # print(json.dumps(message))
-            target_url = "https://open.feishu.cn/open-apis/bot/v2/hook/2d1a1d9f-c5f0-444d-a65d-12ae2af8478e"
+            # 根据路由名称获取对应的目标URL
+            target_url = WEBHOOK_CONFIG.get(route_name, DEFAULT_TARGET_URL)
+            if not target_url:
+                raise Exception(f"No target URL configured for route: {route_name}")
+            
             send_formatted_message(target_url, message)
 
-        return jsonify({"message": "Webhook received and processed"}), 200
+        return jsonify({"message": f"Webhook for {route_name} received and processed"}), 200
     except Exception as e:
         return jsonify({"error": str(e)}), 500
+
+# Webhook 路由 - vendor_bot
+@app.route('/vendor_bot', methods=['POST'])
+def handle_vendor_bot():
+    return process_webhook(request, 'vendor_bot')
+
+# 为配置中的路由添加处理函数
+@app.route('/gitlab_pipeline', methods=['POST'])
+def handle_gitlab_pipeline():
+    return process_webhook(request, 'gitlab_pipeline')
+
+@app.route('/jenkins_build', methods=['POST'])
+def handle_jenkins_build():
+    return process_webhook(request, 'jenkins_build')
+
+# 可以在这里添加更多的路由处理函数
+# @app.route('/custom_route', methods=['POST'])
+# def handle_custom_route():
+#     return process_webhook(request, 'custom_route')
 
 
 def convert_utc_to_utc8(utc_time_str):
