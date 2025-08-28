@@ -19,12 +19,13 @@ docker-build:
   tags:
       - shared-PD4-runner-46
   variables:
-    DOCKER_IMAGE_NAME: $CI_REGISTRY_IMAGE:$CI_COMMIT_REF_SLUG
+    DOCKER_IMAGE_NAME: $CI_PROJECT_TITLE:$CI_COMMIT_REF_SLUG
   script:
     - export
     - echo "docker build --pull -t $REGISTRY_URL/$DOCKER_IMAGE_NAME . "
-    - echo "docker push $REGISTRY_URL/DOCKER_IMAGE_NAME"
-    # - docker push $REGISTRY_URL/DOCKER_IMAGE_NAME
+    - docker build --pull -t $REGISTRY_URL/$DOCKER_IMAGE_NAME . 
+    - echo "docker push $REGISTRY_URL/$DOCKER_IMAGE_NAME"
+    - docker push $REGISTRY_URL/DOCKER_IMAGE_NAME
   # Run this job in a branch where a Dockerfile exists
   rules:
     - if: $CI_COMMIT_BRANCH
