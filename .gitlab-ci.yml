@@ -20,7 +20,7 @@ docker-build:
       - shared-PD4-runner-46
   variables:
     # DOCKER_IMAGE_NAME: $CI_PROJECT_TITLE:$CI_COMMIT_REF_SLUG
-    DOCKER_IMAGE_NAME: $CI_PROJECT_TITLE:v1.$CI_PIPELINE_IID
+    DOCKER_IMAGE_NAME: devops/$CI_PROJECT_TITLE:v1.0.$CI_PIPELINE_IID
   script:
     #- export
     - echo "docker build --pull -t $REGISTRY_URL/$DOCKER_IMAGE_NAME . "
