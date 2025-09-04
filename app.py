@@ -226,6 +226,10 @@ def process_webhook(request, route_name):
 def handle_vendor_bot():
     return process_webhook(request, 'vendor_bot')
 
+@app.route('/vendor_bot/v2', methods=['POST'])
+def handle_vendor_bot_v2():
+    return process_webhook(request, 'vendor_bot/v2')
+
 # 为配置中的路由添加处理函数
 @app.route('/gitlab_pipeline', methods=['POST'])
 def handle_gitlab_pipeline():
