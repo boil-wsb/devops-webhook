@@ -1,4 +1,3 @@
-from PIL.Image import ID
 from flask import Flask, request, jsonify
 from datetime import datetime, timedelta
 import requests
