@@ -19,6 +19,7 @@ DevOps Webhook 服务器
 # 格式: {'路由名称': '目标URL'}
 WEBHOOK_CONFIG = {
     'vendor_bot': 'https://open.feishu.cn/open-apis/bot/v2/hook/2d1a1d9f-c5f0-444d-a65d-12ae2af8478e',
+    'vendor_bot/v2': 'https://open.feishu.cn/open-apis/bot/v2/hook/6373a601-09e7-4cc9-ae64-4d22ed0f0961',
     # 示例：添加更多的路由和对应的URL
     'gitlab_pipeline': 'https://open.feishu.cn/open-apis/bot/v2/hook/example-gitlab-pipeline',
     'jenkins_build': 'https://open.feishu.cn/open-apis/bot/v2/hook/example-jenkins-build',
