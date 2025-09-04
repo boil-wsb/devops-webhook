@@ -1,3 +1,4 @@
+from PIL.Image import ID
 from flask import Flask, request, jsonify
 from datetime import datetime, timedelta
 import requests
@@ -7,7 +8,6 @@ app = Flask(__name__)
 
 """
 DevOps Webhook 服务器
-
 该应用提供了一个灵活的webhook处理系统，可以根据不同的路由配置将webhook事件转发到不同的目标URL。
 主要功能：
 1. 接收来自各种DevOps工具的webhook请求
@@ -19,10 +19,7 @@ DevOps Webhook 服务器
 # 格式: {'路由名称': '目标URL'}
 WEBHOOK_CONFIG = {
     'vendor_bot': 'https://open.feishu.cn/open-apis/bot/v2/hook/2d1a1d9f-c5f0-444d-a65d-12ae2af8478e',
-    'vendor_bot/v2': 'https://open.feishu.cn/open-apis/bot/v2/hook/6373a601-09e7-4cc9-ae64-4d22ed0f0961',
-    # 示例：添加更多的路由和对应的URL
-    'gitlab_pipeline': 'https://open.feishu.cn/open-apis/bot/v2/hook/example-gitlab-pipeline',
-    'jenkins_build': 'https://open.feishu.cn/open-apis/bot/v2/hook/example-jenkins-build',
+    'vendor_bot/v2': 'https://open.feishu.cn/open-apis/bot/v2/hook/6373a601-09e7-4cc9-ae64-4d22ed0f0961'
 }
 
 # 全局配置，当路由没有配置对应的URL时使用
@@ -55,7 +52,6 @@ def calculate_interval(start_time_str, end_time_str, time_format="%Y-%m-%d %H:%M
     # 解析时间字符串为 datetime 对象
     start_time = datetime.strptime(start_time_str, time_format)
     end_time = datetime.strptime(end_time_str, time_format)
-
     # 计算时间间隔（timedelta 对象）
     delta = end_time - start_time
     seconds = delta.seconds
@@ -65,6 +61,8 @@ def calculate_interval(start_time_str, end_time_str, time_format="%Y-%m-%d %H:%M
 # 格式化后的消息模板
 def format_message(payload):
     status = payload['object_attributes']['status']
+    ID = payload['object_attributes']['id']
+    IID = payload['object_attributes']['iid']
     start_time = convert_utc_to_utc8(payload['object_attributes']['created_at'])
     user_name = payload['user']['name']
     branch = payload['object_attributes']['ref']
@@ -170,6 +168,24 @@ def format_message(payload):
                         "tag": "plain_text",
                         "content": ""
                     },
+                    "text_tag_list": [
+                      {
+                        "tag": "text_tag",
+                        "text": {
+                          "tag": "plain_text",
+                          "content": ID
+                        },
+                        "color": "neutral"
+                      },
+                      {
+                        "tag": "text_tag",
+                        "text": {
+                          "tag": "plain_text",
+                          "content": IID
+                        },
+                        "color": "blue"
+                      }
+                    ],
                     "template": message_config['header']['template'],
                     "ud_icon": {
                         "tag": "standard_icon",
@@ -194,11 +210,9 @@ def send_formatted_message(target_url, message):
 def process_webhook(request, route_name):
     """
     处理webhook请求的通用逻辑
-    
     Args:
         request: Flask请求对象
         route_name: 路由名称，用于从配置中获取对应的目标URL
-    
     Returns:
         tuple: (Flask响应对象, HTTP状态码)
     """
@@ -230,15 +244,6 @@ def handle_vendor_bot():
 def handle_vendor_bot_v2():
     return process_webhook(request, 'vendor_bot/v2')
 
-# 为配置中的路由添加处理函数
-@app.route('/gitlab_pipeline', methods=['POST'])
-def handle_gitlab_pipeline():
-    return process_webhook(request, 'gitlab_pipeline')
-
-@app.route('/jenkins_build', methods=['POST'])
-def handle_jenkins_build():
-    return process_webhook(request, 'jenkins_build')
-
 # 可以在这里添加更多的路由处理函数
 # @app.route('/custom_route', methods=['POST'])
 # def handle_custom_route():
@@ -253,13 +258,10 @@ def convert_utc_to_utc8(utc_time_str):
     """
     if not utc_time_str or not utc_time_str.strip():
         return None
-
     # 去掉 "UTC" 并将字符串解析为 datetime 对象
     utc_time = datetime.strptime(utc_time_str.replace(" UTC", ""), "%Y-%m-%d %H:%M:%S")
-
     # 添加 8 小时的偏移量
     utc8_time = utc_time + timedelta(hours=8)
-
     # 返回格式化后的 UTC+8 时间字符串
     return utc8_time.strftime("%Y-%m-%d %H:%M:%S")
 
