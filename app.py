@@ -61,8 +61,8 @@ def calculate_interval(start_time_str, end_time_str, time_format="%Y-%m-%d %H:%M
 # 格式化后的消息模板
 def format_message(payload):
     status = payload['object_attributes']['status']
-    ID = payload['object_attributes']['id']
-    IID = payload['object_attributes']['iid']
+    pipeline_id = payload['object_attributes']['id']
+    pipeline_iid = payload['object_attributes']['iid']
     start_time = convert_utc_to_utc8(payload['object_attributes']['created_at'])
     user_name = payload['user']['name']
     branch = payload['object_attributes']['ref']
@@ -158,39 +158,37 @@ def format_message(payload):
                     } for element in message_config['elements']
                 ]
             },
-            "i18n_header": {
-                "zh_cn": {
-                    "title": {
-                        "tag": "plain_text",
-                        "content": project_name
+            "header": {
+                "title": {
+                    "tag": "plain_text",
+                    "content": project_name
+                },
+                "subtitle": {
+                    "tag": "plain_text",
+                    "content": f"版本号：{pipeline_iid}"
                     },
-                    "subtitle": {
-                        "tag": "plain_text",
-                        "content": ""
-                    },
-                    "text_tag_list": [
-                      {
+                "text_tag_list": [
+                    {
                         "tag": "text_tag",
                         "text": {
-                          "tag": "plain_text",
-                          "content": ID
+                            "tag": "plain_text",
+                            "content": str(pipeline_id)
                         },
-                        "color": "neutral"
-                      },
-                      {
+                        "color": "orange"
+                    },
+                    {
                         "tag": "text_tag",
                         "text": {
-                          "tag": "plain_text",
-                          "content": IID
+                            "tag": "plain_text",
+                            "content": str(pipeline_iid)
                         },
-                        "color": "blue"
-                      }
-                    ],
-                    "template": message_config['header']['template'],
-                    "ud_icon": {
-                        "tag": "standard_icon",
-                        "token": message_config['header']['icon_token'],
+                        "color": "purple"
                     }
+                ],
+                "template": message_config['header']['template'],
+                "ud_icon": {
+                    "tag": "standard_icon",
+                    "token": message_config['header']['icon_token'],
                 }
             }
         }
