@@ -7,7 +7,7 @@ variables:
   DOCKER_IMAGE_NAME: devops/$CI_PROJECT_TITLE:v1.0.$CI_PIPELINE_IID
   REMOTE_USER: root
   REMOTE_HOST: "192.168.23.31"
-  REMOTE_DIR: "/opt/monitor/webhook/"
+  REMOTE_DIR: "/opt/monitor/webhook"
 
 
 docker-build:
@@ -39,7 +39,9 @@ deploy-docker:
     - |
       ssh -o StrictHostKeyChecking=no ${REMOTE_USER}@${REMOTE_HOST} << EOF
       #!/bin/bash
+      echo "docker-compose -f $REMOTE_DIR/docker-compose.yml down"
       docker-compose -f $REMOTE_DIR/docker-compose.yml down
+      sed -n "s|{{DOCKER_IMAGE_NAME}}|$DOCKER_IMAGE_NAME|p" $REMOTE_DIR/docker-compose.yml
       sed -i "s|{{DOCKER_IMAGE_NAME}}|$DOCKER_IMAGE_NAME|g" $REMOTE_DIR/docker-compose.yml
       docker-compose -f $REMOTE_DIR/docker-compose.yml up -d
       EOF
