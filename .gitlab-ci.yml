@@ -31,7 +31,7 @@ docker-build:
         - Dockerfile
 
 deploy-docker:
-  stage: deplo
+  stage: deploy
   tags:
       - shared-PD4-runner-46
   script:
