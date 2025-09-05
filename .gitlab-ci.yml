@@ -39,8 +39,8 @@ deploy-docker:
     - |
       ssh -o StrictHostKeyChecking=no ${REMOTE_USER}@${REMOTE_HOST} << EOF
       #!/bin/bash
-      sed -n "s|    image: .*|${REGISTRY_URL}/    image: ${DOCKER_IMAGE_NAME}|p" $REMOTE_DIR/docker-compose.yml
-      sed -i "s|    image: .*|${REGISTRY_URL}/    image: ${DOCKER_IMAGE_NAME}|g" $REMOTE_DIR/docker-compose.yml
+      sed -n "s|    image: .*|    image: ${REGISTRY_URL}/${DOCKER_IMAGE_NAME}|p" $REMOTE_DIR/docker-compose.yml
+      sed -i "s|    image: .*|    image: ${REGISTRY_URL}/${DOCKER_IMAGE_NAME}|g" $REMOTE_DIR/docker-compose.yml
       docker-compose -f $REMOTE_DIR/docker-compose.yml down
       docker-compose -f $REMOTE_DIR/docker-compose.yml up -d
       EOF
