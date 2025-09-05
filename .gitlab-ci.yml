@@ -5,8 +5,9 @@ stages:
 variables:
   # DOCKER_IMAGE_NAME: $CI_PROJECT_TITLE:$CI_COMMIT_REF_SLUG
   DOCKER_IMAGE_NAME: devops/$CI_PROJECT_TITLE:v1.0.$CI_PIPELINE_IID
-  REMOTE_HOST: 192.168.23.31
-  REMOTE_DIR: /opt/monitor/webhook/
+  REMOTE_USER: root
+  REMOTE_HOST: "192.168.23.31"
+  REMOTE_DIR: "/opt/monitor/webhook/"
 
 
 docker-build:
@@ -30,12 +31,16 @@ docker-build:
         - Dockerfile
 
 deploy-docker:
-  stage: deploy
+  stage: deplo
   tags:
       - shared-PD4-runner-46
   script:
     #- export
-    - docker-compose -f $REMOTE_DIR/docker-compose.yml down
-    - sed -i "s|{{DOCKER_IMAGE_NAME}}|$DOCKER_IMAGE_NAME|g" $REMOTE_DIR/docker-compose.yml
-    - docker-compose -f $REMOTE_DIR/docker-compose.yml up -d
+    - |
+      ssh -o StrictHostKeyChecking=no ${REMOTE_USER}@${REMOTE_HOST} << EOF
+      #!/bin/bash
+      docker-compose -f $REMOTE_DIR/docker-compose.yml down
+      sed -i "s|{{DOCKER_IMAGE_NAME}}|$DOCKER_IMAGE_NAME|g" $REMOTE_DIR/docker-compose.yml
+      docker-compose -f $REMOTE_DIR/docker-compose.yml up -d
+      EOF
   # Run this job in a branch where a Dockerfile exists
