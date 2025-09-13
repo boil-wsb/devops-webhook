@@ -104,9 +104,6 @@ class WebhookLogger:
             # 日志记录失败时的错误处理
             print(f"Error writing webhook log: {str(e)}")
 
-# 创建全局日志实例
-webhook_logger = WebhookLogger()
-
 class MonitorLogger:
     """
     监控事件日志处理器
@@ -206,3 +203,5 @@ class MonitorLogger:
 
 # 创建全局监控日志实例
 monitor_logger = MonitorLogger()
+# 创建全局日志实例
+webhook_logger = WebhookLogger()
