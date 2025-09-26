@@ -484,7 +484,7 @@ def handle_vendor_bot_itreporter():
                 report_path, 
                 expires=timedelta(hours=2)
             )
-            print(f"预签名URL生成成功: {presigned_url}")
+            #print(f"预签名URL生成成功: {presigned_url}")
             
             # 组装飞书卡片消息 - 优化markdown格式
             file_size = os.path.getsize(local_filepath)
@@ -511,15 +511,14 @@ def handle_vendor_bot_itreporter():
                     "i18n_elements": {
                         "zh_cn": [
                             {
-                                "tag": "div",
-                                "text": {
-                                    "tag": "lark_md",
-                                    "content": f"📁 报告路径 : {report_path} \n"
-                                              f"🗄️ 存储桶 : {bucket_name} \n"
-                                              f"📏 文件大小 : {file_size_mb} MB \n"
-                                              f"⏱️ 有效期 : 2小时 |\n\n"
-                                              f"> ⚠️ **安全提醒**: 下载链接有效期为2小时，请尽快下载"
-                                }
+                                "tag": "markdown",
+                                "content": f"📁 报告路径 : {report_path} \n"
+                                            f"🗄️ 存储桶 : {bucket_name} \n"
+                                            f"📏 文件大小 : {file_size_mb} MB \n"
+                                            f"⏱️ 有效期 : 2小时 \n\n"
+                                            f"> ⚠️ **安全提醒**: 下载链接有效期为2小时，请尽快下载",
+                                "text_align": "left",
+                                "text_size": "normal"
                             },
                             {
                                 "tag": "hr"
@@ -551,6 +550,13 @@ def handle_vendor_bot_itreporter():
             
             # 发送到对应的webhook
             target_url = WEBHOOK_CONFIG.get('vendor_bot/itreporter', DEFAULT_TARGET_URL)
+            if target_url and presigned_url:
+                try:
+                    send_formatted_message(target_url, feishu_card_message)
+                except Exception as e:
+                    print(f"❌ 飞书消息发送失败: {str(e)}")
+            else:
+                print(f"⚠️ 未发送飞书消息: target_url={target_url}, presigned_url={presigned_url}")
 
                 
         except Exception as e:
