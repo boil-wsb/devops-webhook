@@ -6,10 +6,115 @@ import os
 import sys
 import re
 from pathlib import Path
+import threading
+import time
+from minio import Minio
+from minio.error import S3Error
 
 # 导入日志处理模块
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from logger import webhook_logger, monitor_logger
+
+# 全局变量：记录运行中的构建
+running_builds = {}
+# 锁，确保线程安全
+running_builds_lock = threading.Lock()
+
+def check_long_running_builds():
+    """
+    后台线程函数，定期检查运行中的构建是否超时
+    每30秒检查一次，超过5分钟（300秒）没有结果的构建发送告警
+    """
+    while True:
+        try:
+            current_time = datetime.now()
+            builds_to_remove = []
+            
+            with running_builds_lock:
+                for pipeline_iid, build_info in running_builds.items():
+                    # 计算已经运行的时间
+                    elapsed_time = (current_time - build_info['start_time']).total_seconds()
+                    
+                    if elapsed_time > 300:  # 超过5分钟
+                        # 发送超时告警
+                        send_long_build_alert(build_info)
+                        # 标记为需要移除
+                        builds_to_remove.append(pipeline_iid)
+            
+            # 移除已经处理超时告警的构建
+            with running_builds_lock:
+                for pipeline_iid in builds_to_remove:
+                    if pipeline_iid in running_builds:
+                        del running_builds[pipeline_iid]
+                        print(f"已移除超时构建记录: {pipeline_iid}")
+            
+            # 每30秒检查一次
+            time.sleep(30)
+            
+        except Exception as e:
+            print(f"检查运行中构建时发生错误: {str(e)}")
+            time.sleep(30)
+
+def send_long_build_alert(build_info):
+    """
+    发送构建超时告警
+    Args:
+        build_info: 构建信息字典
+    """
+    try:
+        duration_minutes = int((datetime.now() - build_info['start_time']).total_seconds() / 60)
+        
+        long_build_message = {
+            "msg_type": "interactive",
+            "card": {
+                "config": {
+                    "update_multi": True
+                },
+                "header": {
+                    "title": {
+                        "tag": "plain_text",
+                        "content": f"⚠️ 构建超时告警 - {build_info['project_name']}"
+                    },
+                    "subtitle": {
+                        "tag": "plain_text",
+                        "content": f"构建已运行 {duration_minutes} 分钟，仍未完成"
+                    },
+                    "template": "yellow"
+                },
+                "i18n_elements": {
+                    "zh_cn": [
+                        {
+                            "tag": "markdown",
+                            "content": f"**项目**：{build_info['project_name']}\n"
+                                        f"**分支**：{build_info['branch']}\n"
+                                        f"**提交人员**：{build_info['user_name']}\n"
+                                        f"**开始时间**：{build_info['start_time_str']}\n"
+                                        f"**Pipeline IID**：{build_info['pipeline_iid']}\n"
+                                        f"**状态**：运行中（超过5分钟）\n"
+                                        f"**建议**：检查构建过程是否卡死或存在性能问题",
+                            "text_align": "left",
+                            "text_size": "normal"
+                        }
+                    ]
+                }
+            }
+        }
+        
+        # 发送告警
+        target_url = WEBHOOK_CONFIG.get('vendor_bot/v2', DEFAULT_TARGET_URL)
+        if target_url:
+            send_formatted_message(target_url, long_build_message)
+            print(f"已发送构建超时告警: {build_info['pipeline_iid']}")
+        
+    except Exception as e:
+        print(f"发送构建超时告警失败: {str(e)}")
+
+# 启动后台检查线程
+def start_build_monitor():
+    """启动构建监控线程"""
+    monitor_thread = threading.Thread(target=check_long_running_builds, daemon=True)
+    monitor_thread.start()
+    print("构建监控线程已启动")
 
 app = Flask(__name__)
 
@@ -28,7 +133,7 @@ def load_config(config_file='config.conf'):
     Args:
         config_file: 配置文件路径 
     Returns:
-        tuple: (WEBHOOK_CONFIG, DEFAULT_TARGET_URL)
+        tuple: (WEBHOOK_CONFIG, DEFAULT_TARGET_URL, MINIO_CONFIG)
     """
     config_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), config_file)
     
@@ -36,9 +141,15 @@ def load_config(config_file='config.conf'):
     default_config = {
         'webhook_config': {
             'vendor_bot': 'https://open.feishu.cn/open-apis/bot/v2/hook/2d1a1d9f-c5f0-444d-a65d-12ae2af8478e',
-            'vendor_bot/v2': 'https://open.feishu.cn/open-apis/bot/v2/hook/1b78f2d5-0cd0-4035-85fe-a2d8a4b207c6',
+            'vendor_bot/v2': 'https://open.feishu.cn/open-apis/bot/v2/hook/6373a601-09e7-4cc9-ae64-4d22ed0f0961',
+            'vendor_bot/itreporter': 'https://open.feishu.cn/open-apis/bot/v2/hook/1b78f2d5-0cd0-4035-85fe-a2d8a4b207c6',
         },
-        'default_target_url': 'https://open.feishu.cn/open-apis/bot/v2/hook/1b78f2d5-0cd0-4035-85fe-a2d8a4b207c6'
+        'default_target_url': 'https://open.feishu.cn/open-apis/bot/v2/hook/1b78f2d5-0cd0-4035-85fe-a2d8a4b207c6',
+        'minio_config': {
+            'minio_endpoint': 'http://192.168.23.36:9000',
+            'minio_access_key': 'fYIukgJZaLOivnFimLVX',
+            'minio_secret_key': 'shdyfYIukgJZaLOivnFimLVX123',
+        }
     }
     
     try:
@@ -47,18 +158,19 @@ def load_config(config_file='config.conf'):
                 config = json.load(f)
                 webhook_config = config.get('webhook_config', default_config['webhook_config'])
                 default_target_url = config.get('default_target_url', default_config['default_target_url'])
-                return webhook_config, default_target_url
+                minio_config = config.get('minio_config', default_config['minio_config'])
+                return webhook_config, default_target_url, minio_config
         else:
             # 如果配置文件不存在，记录日志并使用默认配置
             app.logger.warning(f"Config file {config_path} not found, using default config")
-            return default_config['webhook_config'], default_config['default_target_url']
+            return default_config['webhook_config'], default_config['default_target_url'], default_config['minio_config']
     except json.JSONDecodeError as e:
         # 配置文件格式错误，记录日志并使用默认配置
         app.logger.error(f"Failed to parse config file: {str(e)}")
-        return default_config['webhook_config'], default_config['default_target_url']
+        return default_config['webhook_config'], default_config['default_target_url'], default_config['minio_config']
 
 # 加载配置
-WEBHOOK_CONFIG, DEFAULT_TARGET_URL = load_config()
+WEBHOOK_CONFIG, DEFAULT_TARGET_URL, MINIO_CONFIG = load_config()
 
 
 def format_duration(seconds):
@@ -122,6 +234,19 @@ def format_message(payload):
             print(f"未找到相同project_name={project_name}, branch={branch}的其他pipeline记录")
 
     if 'running' == status:
+        # 记录运行中的构建
+        with running_builds_lock:
+            running_builds[str(pipeline_iid)] = {
+                'pipeline_iid': str(pipeline_iid),
+                'project_name': project_name,
+                'branch': branch,
+                'user_name': user_name,
+                'start_time': datetime.now(),
+                'start_time_str': start_time,
+                'commit_title': commit_title
+            }
+            #print(f"已记录运行中的构建: {pipeline_iid}")
+        
         message_config = {
             'elements': [
                 {
@@ -147,6 +272,12 @@ def format_message(payload):
             },
         }
     elif 'success' == status or 'failed' == status:
+        # 构建完成，从运行中构建记录中移除
+        with running_builds_lock:
+            if str(pipeline_iid) in running_builds:
+                del running_builds[str(pipeline_iid)]
+                #print(f"构建完成，移除记录: {pipeline_iid}")
+        
         duration = payload['object_attributes']['duration']
         if duration:
             duration = format_duration(duration)
@@ -257,6 +388,7 @@ def send_formatted_message(target_url, message):
     response = requests.post(target_url, headers=headers, data=json.dumps(message))
     if response.status_code not in [200, 201]:
         raise Exception(f"Failed to send message. Status code: {response.status_code}, Response: {response.text}")
+    return True
 
 
 # 通用的webhook处理逻辑
@@ -301,6 +433,154 @@ def handle_vendor_bot():
 @app.route('/vendor_bot/v2', methods=['POST'])
 def handle_vendor_bot_v2():
     return process_webhook(request, 'vendor_bot/v2')
+
+@app.route('/vendor_bot/itreporter', methods=['POST'])
+def handle_vendor_bot_itreporter():
+    """
+    处理来自远程服务器的JSON请求
+    接收JSON数据，根据report_path从MinIO下载文件到本地
+    """
+    try:
+        # 获取JSON请求数据
+        json_data = request.get_json()
+        
+        if json_data is None:
+            return jsonify({'status': 'error', 'message': 'Invalid JSON data'}), 400
+        
+        # 记录接收到的请求
+        # print(f"收到IT Reporter请求: {json.dumps(json_data, ensure_ascii=False)}")
+        
+        # 获取report_path字段
+        report_path = json_data.get('report_path')
+        if not report_path:
+            return jsonify({'status': 'error', 'message': 'Missing report_path field'}), 400
+        
+        # 初始化MinIO客户端
+        minio_client = Minio(
+            MINIO_CONFIG['minio_endpoint'].replace('http://', '').replace('https://', ''),
+            access_key=MINIO_CONFIG['minio_access_key'],
+            secret_key=MINIO_CONFIG['minio_secret_key'],
+            secure=MINIO_CONFIG['minio_endpoint'].startswith('https://')
+        )
+        
+        bucket_name = json_data.get('minio_bucket')
+        
+        # 生成本地文件路径
+        local_filename = os.path.basename(report_path)
+        local_filepath = os.path.join('downloads', local_filename)
+        
+        # 确保下载目录存在
+        os.makedirs('downloads', exist_ok=True)
+        
+        # 从MinIO下载文件到本地
+        minio_client.fget_object(bucket_name, report_path, local_filepath)
+        
+        #print(f"文件下载成功: {local_filepath}")
+        
+        # 生成预签名URL（有效期2小时）
+        try:
+            presigned_url = minio_client.presigned_get_object(
+                bucket_name, 
+                report_path, 
+                expires=timedelta(hours=2)
+            )
+            print(f"预签名URL生成成功: {presigned_url}")
+            
+            # 组装飞书卡片消息 - 优化markdown格式
+            file_size = os.path.getsize(local_filepath)
+            file_size_mb = round(file_size / (1024 * 1024), 2)
+            
+            feishu_card_message = {
+                "msg_type": "interactive",
+                "card": {
+                    "config": {
+                        "update_multi": True,
+                        "enable_forward": True
+                    },
+                    "header": {
+                        "title": {
+                            "tag": "plain_text",
+                            "content": "📊 IT系统运行报告"
+                        },
+                        "subtitle": {
+                            "tag": "plain_text", 
+                            "content": f"📋 {os.path.basename(report_path)}"
+                        },
+                        "template": "blue"
+                    },
+                    "i18n_elements": {
+                        "zh_cn": [
+                            {
+                                "tag": "div",
+                                "text": {
+                                    "tag": "lark_md",
+                                    "content": f"📁 报告路径 : {report_path} \n"
+                                              f"🗄️ 存储桶 : {bucket_name} \n"
+                                              f"📏 文件大小 : {file_size_mb} MB \n"
+                                              f"⏱️ 有效期 : 2小时 |\n\n"
+                                              f"> ⚠️ **安全提醒**: 下载链接有效期为2小时，请尽快下载"
+                                }
+                            },
+                            {
+                                "tag": "hr"
+                            },
+                            {
+                                "tag": "action",
+                                "actions": [
+                                    {
+                                        "tag": "button",
+                                        "type": "primary",
+                                        "text": {
+                                            "tag": "plain_text",
+                                            "content": "📥 下载报告"
+                                        },
+                                        "url": presigned_url,
+                                        "multi_url": {
+                                            "url": presigned_url,
+                                            "android_url": presigned_url,
+                                            "ios_url": presigned_url,
+                                            "pc_url": presigned_url
+                                        }
+                                    }
+                                ]
+                            }
+                        ]
+                    }
+                }
+            }
+            
+            # 发送到对应的webhook
+            target_url = WEBHOOK_CONFIG.get('vendor_bot/itreporter', DEFAULT_TARGET_URL)
+
+                
+        except Exception as e:
+            print(f"生成预签名URL失败: {str(e)}")
+            presigned_url = None
+        
+        # 返回成功响应，包含预签名URL
+        response_data = {
+            'status': 'success', 
+            'message': 'File downloaded successfully from MinIO',
+            'data': {
+                'file_size': os.path.getsize(local_filepath),
+                'presigned_url': presigned_url,
+                'url_expires_in': '2 hours' if presigned_url else None,
+                'feishu_message_sent': presigned_url is not None
+            }
+        }
+        
+        return jsonify(response_data), 200
+        
+    except S3Error as e:
+        return jsonify({
+            'status': 'error', 
+            'message': f'MinIO error: {str(e)}'
+        }), 500
+    except Exception as e:
+        return jsonify({
+            'status': 'error', 
+            'message': str(e)
+        }), 500
 
 @app.route('/monitor/event', methods=['POST'])
 def monitor_event():
@@ -553,4 +833,6 @@ def find_similar_pipeline_records(project_name, branch, current_pipeline_iid, bu
     return similar_records
 
 if __name__ == '__main__':
+    # 启动构建监控线程
+    start_build_monitor()
     app.run(host='0.0.0.0', port=8080)
