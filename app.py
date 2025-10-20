@@ -343,7 +343,7 @@ def format_message(payload):
                 },
                 "subtitle": {
                     "tag": "plain_text",
-                    "content": f"镜像版本号：{pipeline_iid_prev if pipeline_iid_prev else pipeline_iid}"
+                    "content": f"Pipeline版本号：{pipeline_iid_prev if pipeline_iid_prev else pipeline_iid}"
                 },
                 "text_tag_list": [
                     {
@@ -757,11 +757,12 @@ def convert_utc_to_utc8(utc_time_str):
     if not utc_time_str or not utc_time_str.strip():
         return None
     # 去掉 "UTC" 并将字符串解析为 datetime 对象
-    utc_time = datetime.strptime(utc_time_str.replace(" UTC", ""), "%Y-%m-%d %H:%M:%S")
+    utc_time = datetime.strptime(utc_time_str.replace(" +0800", ""), "%Y-%m-%d %H:%M:%S")
     # 添加 8 小时的偏移量
-    utc8_time = utc_time + timedelta(hours=8)
+    #+utc8_time = utc_time + timedelta(hours=8)
     # 返回格式化后的 UTC+8 时间字符串
-    return utc8_time.strftime("%Y-%m-%d %H:%M:%S")
+    return utc_time.strftime("%Y-%m-%d %H:%M:%S")
+    #return utc8_time.strftime("%Y-%m-%d %H:%M:%S")
 
 
 def find_similar_pipeline_records(project_name, branch, current_pipeline_iid, build_type):

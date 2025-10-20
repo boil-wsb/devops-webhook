@@ -1,5 +1,5 @@
 # 使用官方 Python 基础镜像
-FROM python:3.9-slim
+FROM 192.168.100.213:8083/devops/python:3.9-slim
 
 # 设置工作目录
 WORKDIR /app
