@@ -271,12 +271,16 @@ def format_message(payload):
                 'icon_token': 'bell_filled'
             },
         }
-    elif 'success' == status or 'failed' == status:
-        # 构建完成，从运行中构建记录中移除
+    elif 'success' == status or 'failed' == status or 'canceled' == status:
+        # 构建完成或取消，从运行中构建记录中移除
         with running_builds_lock:
             if str(pipeline_iid) in running_builds:
                 del running_builds[str(pipeline_iid)]
-                #print(f"构建完成，移除记录: {pipeline_iid}")
+                #print(f"构建完成或取消，移除记录: {pipeline_iid}")
+        
+        # 对于canceled状态，不需要生成消息
+        if 'canceled' == status:
+            return None
         
         duration = payload['object_attributes']['duration']
         if duration:
@@ -312,6 +316,53 @@ def format_message(payload):
     else:
         return None
 
+    # 创建基础的text_tag_list
+    text_tag_list = [
+        {
+            "tag": "text_tag",
+            "text": {
+                "tag": "plain_text",
+                "content": str(pipeline_id)
+            },
+            "color": "orange"
+        },
+        {
+            "tag": "text_tag",
+            "text": {
+                "tag": "plain_text",
+                "content": str(pipeline_iid)
+            },
+            "color": "purple"
+        },
+        {
+            "tag": "text_tag",
+            "text": {
+                "tag": "plain_text",
+                "content": str(source)
+            },
+            "color": "yellow"
+        }
+    ]
+
+    # 如果状态是failed，添加失败的builds信息到text_tag_list
+    if 'failed' == status:
+        failed_stages = []
+        # 遍历builds数组，找出状态为failed的作业
+        for build in payload.get('builds', []):
+            if build.get('status') == 'failed':
+                failed_stages.append(build.get('name', 'Unknown'))
+        
+        # 如果有失败的builds，添加到text_tag_list中
+        if failed_stages:
+            text_tag_list.append({
+                "tag": "text_tag",
+                "text": {
+                    "tag": "plain_text",
+                    "content": f"失败Stage: {', '.join(failed_stages)}"
+                },
+                "color": "red"
+            })
+
     message = {
         "msg_type": "interactive",
         "card": {
@@ -345,32 +396,7 @@ def format_message(payload):
                     "tag": "plain_text",
                     "content": f"Pipeline版本号：{pipeline_iid_prev if pipeline_iid_prev else pipeline_iid}"
                 },
-                "text_tag_list": [
-                    {
-                        "tag": "text_tag",
-                        "text": {
-                            "tag": "plain_text",
-                            "content": str(pipeline_id)
-                        },
-                        "color": "orange"
-                    },
-                    {
-                        "tag": "text_tag",
-                        "text": {
-                            "tag": "plain_text",
-                            "content": str(pipeline_iid)
-                        },
-                        "color": "purple"
-                    },
-                    {
-                        "tag": "text_tag",
-                        "text": {
-                            "tag": "plain_text",
-                            "content": str(source)
-                        },
-                        "color": "yellow"
-                    }
-                ],
+                "text_tag_list": text_tag_list,
                 "template": message_config['header']['template'],
                 "ud_icon": {
                     "tag": "standard_icon",
