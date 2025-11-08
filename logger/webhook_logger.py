@@ -146,7 +146,7 @@ class WebhookLogger(BaseLogger):
 class MonitorLogger(BaseLogger):
     """
     监控事件日志处理器
-    专门用于记录监控事件，只输出到日志文件，不打印到控制台
+    专门用于记录监控事件，同时输出到日志文件和控制台
     """
     def __new__(cls, log_dir='logs', log_name='monitor_event'):
         # 重写__new__方法以使用自定义的日志名称
@@ -154,7 +154,7 @@ class MonitorLogger(BaseLogger):
 
     def _configure_logger(self):
         """
-        配置日志记录器，只设置文件处理器，不设置控制台输出
+        配置日志记录器，设置文件处理器和控制台输出
         """
         logger = logging.getLogger('monitor_event_logger')
         logger.setLevel(logging.INFO)
@@ -165,8 +165,13 @@ class MonitorLogger(BaseLogger):
         file_handler = self._create_file_handler('monitor_event_logger')
         formatter = self._create_base_formatter()
         file_handler.setFormatter(formatter)
-        # 添加文件处理器到logger（注意：不添加控制台处理器）
+        # 添加文件处理器到logger
         logger.addHandler(file_handler)
+        
+        # 添加控制台输出
+        console_handler = self._create_console_handler()
+        console_handler.setFormatter(formatter)
+        logger.addHandler(console_handler)
         
         return logger
     
