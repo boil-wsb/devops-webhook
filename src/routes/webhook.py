@@ -72,19 +72,6 @@ def process_webhook(request, route_name, subpath=None):
         else:
             # 处理流水线事件
             try:
-                # 直接使用传递进来的subpath参数
-                # 根据 payload['project']['namespace'] 路由 webhook
-                namespace = payload.get('project', {}).get('namespace', '')
-                if namespace:
-                    namespace_route = f'vendor_bot/v2/{namespace}'
-                    # 优先使用命名空间路由
-                    if namespace_route in WEBHOOK_CONFIG:
-                        route_name = namespace_route
-                    elif route_name in WEBHOOK_CONFIG:
-                        pass
-                    else:
-                        route_name = '/monitor/event'
-
                 # 记录流水线事件
                 record_pipeline_event(payload, subpath, pipeline_records, pipeline_records_lock)
                 
