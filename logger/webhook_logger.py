@@ -193,7 +193,69 @@ class MonitorLogger(BaseLogger):
             # 日志记录失败时的错误处理
             print(f"Error writing monitor event log: {str(e)}")
 
+
+class AccessLogger(BaseLogger):
+    """
+    HTTP访问日志处理器
+    用于记录HTTP请求的访问日志，格式与Apache访问日志类似
+    """
+    
+    def __new__(cls, log_dir='logs', log_name='access'):
+        # 重写__new__方法以使用自定义的日志名称
+        return super().__new__(cls, log_dir, log_name)
+    
+    def _create_access_formatter(self):
+        """
+        创建访问日志的专用格式器
+        只记录原始日志条目，不添加额外的时间戳和级别信息
+        """
+        return logging.Formatter('%(message)s')
+    
+    def _configure_logger(self):
+        """
+        配置日志记录器，设置按日期滚动的文件处理器
+        """
+        logger = logging.getLogger('access_logger')
+        logger.setLevel(logging.INFO)
+        
+        # 清除已有的处理器，避免重复添加
+        for handler in logger.handlers[:]:
+            logger.removeHandler(handler)
+        
+        # 创建文件处理器
+        file_handler = self._create_file_handler('access_logger')
+        # 使用访问日志专用格式器，只记录原始日志条目
+        formatter = self._create_access_formatter()
+        file_handler.setFormatter(formatter)
+        logger.addHandler(file_handler)
+        
+        # 不添加控制台输出，只记录到文件
+        
+        return logger
+    
+    def log_access(self, remote_addr, request_method, path, http_version, status_code, response_length):
+        """
+        记录HTTP访问日志
+        Args:
+            remote_addr: 客户端IP地址
+            request_method: HTTP请求方法 (GET, POST等)
+            path: 请求路径
+            http_version: HTTP版本
+            status_code: HTTP状态码
+            response_length: 响应长度
+        """
+        try:
+            # 格式化日志条目，匹配Apache访问日志格式
+            log_entry = f"{remote_addr} - - [{datetime.now().strftime('%d/%b/%Y %H:%M:%S')}] \"{request_method} {path} {http_version}\" {status_code} {response_length}"
+            # 记录日志
+            self.logger.info(log_entry)
+        except Exception as e:
+            # 日志记录失败时的错误处理
+            print(f"Error writing access log: {str(e)}")
+
 # 创建全局监控日志实例
 monitor_logger = MonitorLogger()
 # 创建全局日志实例
 webhook_logger = WebhookLogger()
+# 创建全局访问日志实例
+access_logger = AccessLogger()

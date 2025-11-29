@@ -1,0 +1,14 @@
+[
+  {
+    "project_name": "test-persist",
+    "ref": "refs/heads/main",
+    "user_name": "test-user",
+    "commits": [
+      {
+        "url": "http://example.com/test/test-persist/commit/123",
+        "message": "test commit for persistence",
+        "timestamp": "2023-01-01T00:00:00Z"
+      }
+    ]
+  }
+]
