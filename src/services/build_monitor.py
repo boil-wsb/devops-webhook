@@ -84,7 +84,9 @@ def check_long_running_builds(running_builds, running_builds_lock):
                     if elapsed_time > 300:  # 测试时改为10秒，方便快速验证
                         # 发送超时告警
                         print(f"🚨 构建超时，发送告警: {pipeline_iid}")
-                        send_long_build_alert(build_info)
+                        # 从构建信息中获取route_name
+                        build_route_name = build_info.get('route_name', '')
+                        send_long_build_alert(build_info, build_route_name)
                         # 标记为需要移除
                         builds_to_remove.append(pipeline_iid)
             
@@ -103,7 +105,7 @@ def check_long_running_builds(running_builds, running_builds_lock):
             time.sleep(30)
 
 
-def start_build_monitor(running_builds, running_builds_lock):
+def start_build_monitor_thread(running_builds, running_builds_lock):
     """启动构建监控线程
     Args:
         running_builds: 全局运行中构建字典

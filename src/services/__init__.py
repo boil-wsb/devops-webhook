@@ -9,7 +9,7 @@ from logger import webhook_logger, monitor_logger
 from src.services.message import send_formatted_message, format_message
 from src.services.record import record_pipeline_event, record_push_event
 from src.services.monitor import parse_alertmanager_request, send_monitor_message
-from src.services.build_monitor import start_build_monitor as start_build_monitor_thread
+from src.services.build_monitor import start_build_monitor_thread
 
 # 导出所有公共API
 __all__ = [

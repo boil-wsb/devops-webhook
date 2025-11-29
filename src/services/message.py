@@ -15,7 +15,7 @@ def send_formatted_message(target_url, message):
     return True
 
 
-def format_message(payload, running_builds=None, running_builds_lock=None):
+def format_message(payload, running_builds=None, running_builds_lock=None, route_name=None):
     """
     格式化消息
     """
@@ -86,7 +86,8 @@ def format_message(payload, running_builds=None, running_builds_lock=None):
                         'user_name': user_name,
                         'start_time': datetime.now(),
                         'start_time_str': start_time,
-                        'detail_url': detail_url
+                        'detail_url': detail_url,
+                        'route_name': route_name
                     }
             except Exception as e:
                 print(f"❌ 记录运行中构建失败: {str(e)}")

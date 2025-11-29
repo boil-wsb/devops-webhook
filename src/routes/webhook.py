@@ -76,7 +76,7 @@ def process_webhook(request, route_name, subpath=None):
                 record_pipeline_event(payload, subpath, pipeline_records, pipeline_records_lock)
                 
                 try:
-                    message = format_message(payload, running_builds, running_builds_lock)
+                    message = format_message(payload, running_builds, running_builds_lock, route_name)
                     
                     if message:
                         # 根据路由名称获取对应的目标URL
