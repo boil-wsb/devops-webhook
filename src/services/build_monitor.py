@@ -5,11 +5,12 @@ from src.config import WEBHOOK_CONFIG, DEFAULT_TARGET_URL
 from src.services.message import send_formatted_message
 
 
-def send_long_build_alert(build_info):
+def send_long_build_alert(build_info, route_name):
     """
     发送构建超时告警
     Args:
         build_info: 构建信息字典
+        route_name: webhook路由名称
     """
     try:
         duration_minutes = int((datetime.now() - build_info['start_time']).total_seconds() / 60)
@@ -50,11 +51,11 @@ def send_long_build_alert(build_info):
             }
         }
         
-        # 发送告警
-        target_url = WEBHOOK_CONFIG.get('vendor_bot/v2', DEFAULT_TARGET_URL)
+        # 发送告警，使用传入的route_name获取对应的target_url
+        target_url = WEBHOOK_CONFIG.get(route_name, DEFAULT_TARGET_URL)
         if target_url:
             send_formatted_message(target_url, long_build_message)
-            print(f"已发送构建超时告警: {build_info['pipeline_iid']}")
+            print(f"已发送构建超时告警: {build_info['pipeline_iid']}，使用路由: {route_name}")
         
     except Exception as e:
         print(f"发送构建超时告警失败: {str(e)}")

@@ -83,7 +83,7 @@ def process_webhook(request, route_name, subpath=None):
                         target_url = WEBHOOK_CONFIG.get(route_name, DEFAULT_TARGET_URL)
                         if not target_url:
                             raise Exception(f"No target URL configured for route: {route_name}")
-                        
+                        print(f"route_name: {route_name}, target_url: {target_url}")
                         send_formatted_message(target_url, message)
                 except Exception as e:
                     print(f"❌ format_message调用失败: {str(e)}")
