@@ -6,21 +6,29 @@ def register_routes(app):
     注册所有路由
     """
     # Webhook 路由 - vendor_bot
-    @app.route('/vendor_bot', defaults={'version': None, 'subpath': None}, methods=['POST'])
-    @app.route('/vendor_bot/v2', defaults={'subpath': None}, methods=['POST'])
     @app.route('/vendor_bot/v2/<path:subpath>', methods=['POST'])
-    def vendor_bot_route(version=None, subpath=None):
+    def vendor_bot_v2_subpath_route(subpath):
         """
-        处理所有 vendor_bot 相关的 Webhook 请求
+        处理 vendor_bot/v2/<subpath> 格式的 Webhook 请求
         """
-        if version:
-            if subpath:
-                route_name = f'vendor_bot/{version}/{subpath}'
-            else:
-                route_name = f'vendor_bot/{version}'
-        else:
-            route_name = 'vendor_bot'
+        route_name = f'vendor_bot/v2/{subpath}'
         return process_webhook(request, route_name, subpath)
+    
+    @app.route('/vendor_bot/v2', methods=['POST'])
+    def vendor_bot_v2_route():
+        """
+        处理 vendor_bot/v2 格式的 Webhook 请求
+        """
+        route_name = 'vendor_bot/v2'
+        return process_webhook(request, route_name, None)
+    
+    @app.route('/vendor_bot', methods=['POST'])
+    def vendor_bot_v1_route():
+        """
+        处理 vendor_bot 格式的 Webhook 请求
+        """
+        route_name = 'vendor_bot'
+        return process_webhook(request, route_name, None)
     
     @app.route('/vendor_bot/itreporter', methods=['POST'])
     def vendor_bot_itreporter_route():
