@@ -50,6 +50,8 @@ def format_message(payload, running_builds=None, running_builds_lock=None, route
 
     if 'running' == status:
         # 记录运行中的构建
+        # 处理commit_title中的换行符，确保在markdown中正确显示
+        formatted_commit_title = commit_title.replace('\n', '  \n')
         message_config = {
             'elements': [
                 {
@@ -66,7 +68,7 @@ def format_message(payload, running_builds=None, running_builds_lock=None, route
                 },
                 {
                     'icon': 'doc_outlined',
-                    'content': f"***Commit***：{commit_title}",
+                    'content': f"***Commit***：{formatted_commit_title}",
                 },
             ],
             'header': {

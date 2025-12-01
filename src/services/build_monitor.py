@@ -75,21 +75,24 @@ def check_long_running_builds(running_builds, running_builds_lock):
             builds_to_remove = []
             
             with running_builds_lock:
-                # 打印当前running_builds的内容，用于调试
-                print(f"\n📊 当前运行中构建数量: {len(running_builds)}")
-                for pipeline_iid, build_info in running_builds.items():
-                    print(f"🔍 检查构建: {pipeline_iid}, 开始时间: {build_info['start_time']}")
-                    elapsed_time = (current_time - build_info['start_time']).total_seconds()
-                    print(f"⏱️  已运行时间: {elapsed_time} 秒")
-                    
-                    if elapsed_time > 300:  # 测试时改为10秒，方便快速验证
-                        # 发送超时告警
-                        print(f"🚨 构建超时，发送告警: {pipeline_iid}")
-                        # 从构建信息中获取route_name
-                        build_route_name = build_info.get('route_name', '')
-                        send_long_build_alert(build_info, build_route_name)
-                        # 标记为需要移除
-                        builds_to_remove.append(pipeline_iid)
+                build_count = len(running_builds)
+                # 只有当运行中构建数量大于0时，才打印日志
+                if build_count > 0:
+                    # 打印当前running_builds的内容，用于调试
+                    print(f"\n📊 当前运行中构建数量: {build_count}")
+                    for pipeline_iid, build_info in running_builds.items():
+                        print(f"🔍 检查构建: {pipeline_iid}, 开始时间: {build_info['start_time']}")
+                        elapsed_time = (current_time - build_info['start_time']).total_seconds()
+                        print(f"⏱️  已运行时间: {elapsed_time} 秒")
+                        
+                        if elapsed_time > 300:  # 测试时改为10秒，方便快速验证
+                            # 发送超时告警
+                            print(f"🚨 构建超时，发送告警: {pipeline_iid}")
+                            # 从构建信息中获取route_name
+                            build_route_name = build_info.get('route_name', '')
+                            send_long_build_alert(build_info, build_route_name)
+                            # 标记为需要移除
+                            builds_to_remove.append(pipeline_iid)
             
             # 移除已经处理超时告警的构建
             with running_builds_lock:
