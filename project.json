@@ -60,5 +60,14 @@
     "pipeline_iid": 35,
     "git_url": "http://192.168.23.19/devops/infrastructure/devops-webhook",
     "subpath": "DO"
+  },
+  "digital-ai/hr_tool_lark": {
+    "namespace": "DO-数字化部-内部研发",
+    "project_name": "hr_tool_lark",
+    "pipeline_path": "http://192.168.23.19/digital-ai/hr_tool_lark/-/pipelines/new",
+    "path_with_namespace": "digital-ai/hr_tool_lark",
+    "pipeline_iid": 203,
+    "git_url": "http://192.168.23.19/digital-ai/hr_tool_lark",
+    "subpath": "DO"
   }
 }

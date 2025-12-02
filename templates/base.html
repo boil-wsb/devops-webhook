@@ -169,12 +169,76 @@
             box-shadow: 0 2px 4px var(--shadow-color);
             padding: 20px;
             transition: box-shadow 0.3s ease, transform 0.2s ease;
-            cursor: pointer;
+            display: flex;
+            flex-direction: column;
+            height: auto;
+            min-height: 200px;
+            margin-bottom: 20px;
         }
         
         .record-card:hover {
             box-shadow: 0 4px 8px var(--shadow-hover);
             transform: translateY(-2px);
+        }
+        
+        /* 卡片内容区域 */
+        .card-content {
+            flex: 1;
+            margin-bottom: 15px;
+        }
+        
+        /* 卡片操作区域 */
+        .card-actions {
+            padding-top: 15px;
+            border-top: 1px solid var(--border-color);
+            display: flex;
+            justify-content: space-between;
+            gap: 10px;
+        }
+        
+        /* 卡片间距 */
+        .cards-container {
+            margin-top: 20px;
+            margin-bottom: 40px;
+        }
+        
+        /* 卡片按钮样式 */
+        .card-btn {
+            display: inline-block;
+            padding: 8px 16px;
+            border-radius: 4px;
+            font-size: 14px;
+            font-weight: bold;
+            text-decoration: none;
+            transition: all 0.2s ease;
+            cursor: pointer;
+            border: none;
+            text-align: center;
+            min-width: 120px;
+        }
+        
+        /* 构建按钮样式 */
+        .build-btn {
+            background-color: var(--btn-bg);
+            color: white;
+        }
+        
+        .build-btn:hover {
+            background-color: var(--btn-hover);
+            transform: translateY(-1px);
+            box-shadow: 0 2px 4px rgba(0,0,0,0.2);
+        }
+        
+        /* Git按钮样式 */
+        .git-btn {
+            background-color: var(--card-bg);
+            color: var(--btn-bg);
+            border: 1px solid var(--btn-bg);
+        }
+        
+        .git-btn:hover {
+            background-color: var(--btn-bg);
+            color: white;
         }
         
         /* 卡片标题 */
@@ -402,8 +466,8 @@
             {% for record in records %}
                 {% set is_default = record.namespace == 'default' and record.project_name == '示例项目' %}
                 {% set card_class = 'record-card default-record' if is_default else 'record-card' %}
-                <a href="{{ record.pipeline_path or '#' }}" target="_blank" style="text-decoration: none; color: inherit;">
-                    <div class="{{ card_class }}">
+                <div class="{{ card_class }}">
+                    <div class="card-content">
                         <div class="record-title">
                             {{ record.project_name or 'N/A' }}
                             <span class="tag pipeline-iid-tag">{{ record.pipeline_iid or 'N/A' }}</span>
@@ -417,18 +481,15 @@
                             <span class="field-value">{{ record.path_with_namespace or 'N/A' }}</span>
                         </div>
                         <div class="record-field">
-                            <span class="field-label">Git地址:</span>
-                            <span class="field-value">{{ record.git_url or 'N/A' }}</span>
-                        </div>
-                        <div class="record-field">
-                            <span class="field-label">最近触发人:</span>
+                            <span class="field-label">最新触发人:</span>
                             <span class="field-value">{{ record.latest_triggered_by or 'N/A' }}</span>
                         </div>
-                        <div class="record-field">
-                            <span class="field-value pipeline-cta">点我进入构建入口</span>
-                        </div>
                     </div>
-                </a>
+                    <div class="card-actions">
+                        <a href="{{ record.git_url or '#' }}" target="_blank" class="card-btn git-btn">进入项目</a>
+                        <a href="{{ record.pipeline_path or '#' }}" target="_blank" class="card-btn build-btn">点我进入构建入口</a>
+                    </div>
+                </div>
             {% endfor %}
         </div>
     </div>
