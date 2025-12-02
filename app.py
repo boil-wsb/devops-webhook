@@ -7,7 +7,7 @@ from src.routes import register_routes
 from src.services import start_build_monitor
 from logger import access_logger
 
-app = Flask(__name__)
+app = Flask(__name__, static_folder='static')
 
 # 注册所有路由
 register_routes(app)

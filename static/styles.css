@@ -1,0 +1,397 @@
+/* 基础样式和深色模式变量 */
+:root {
+    --bg-color: #f5f5f5;
+    --card-bg: white;
+    --text-color: #333;
+    --label-color: #555;
+    --border-color: #ddd;
+    --shadow-color: rgba(0,0,0,0.1);
+    --shadow-hover: rgba(0,0,0,0.15);
+    --btn-bg: #007bff;
+    --btn-hover: #0056b3;
+    --refresh-btn: #28a745;
+    --refresh-hover: #218838;
+    --note-bg: #e9ecef;
+    --note-border: #007bff;
+    --default-bg: #e3f2fd;
+    --default-border: #2196f3;
+    --tag-bg: #6c757d;
+    --tag-pipeline: #28a745;
+}
+
+/* 深色模式 */
+[data-theme="dark"] {
+    --bg-color: #121212;
+    --card-bg: #1e1e1e;
+    --text-color: #e0e0e0;
+    --label-color: #b0b0b0;
+    --border-color: #333;
+    --shadow-color: rgba(0,0,0,0.3);
+    --shadow-hover: rgba(0,0,0,0.4);
+    --btn-bg: #1976d2;
+    --btn-hover: #1565c0;
+    --refresh-btn: #388e3c;
+    --refresh-hover: #2e7d32;
+    --note-bg: #2c2c2c;
+    --note-border: #1976d2;
+    --default-bg: #1a237e;
+    --default-border: #303f9f;
+    --tag-bg: #616161;
+    --tag-pipeline: #388e3c;
+}
+
+/* 全局样式 */
+body {
+    font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+    margin: 0;
+    padding: 20px;
+    background-color: var(--bg-color);
+    color: var(--text-color);
+    transition: background-color 0.3s ease, color 0.3s ease;
+}
+
+.container {
+    max-width: 1200px;
+    margin: 0 auto;
+}
+
+h1 {
+    color: var(--text-color);
+    text-align: center;
+    margin-bottom: 30px;
+}
+
+/* 主题切换按钮 */
+.theme-toggle {
+    background-color: var(--card-bg);
+    color: var(--text-color);
+    border: 1px solid var(--border-color);
+    padding: 5px 12px;
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 14px;
+    transition: all 0.2s ease;
+}
+
+.theme-toggle:hover {
+    background-color: var(--btn-bg);
+    color: white;
+    border-color: var(--btn-bg);
+}
+
+/* 记录数量 */
+.records-count {
+    background-color: var(--btn-bg);
+    color: white;
+    padding: 10px 15px;
+    border-radius: 5px;
+    margin-bottom: 20px;
+    display: inline-block;
+}
+
+/* 卡片容器 - 响应式布局 */
+.cards-container {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(350px, 1fr));
+    gap: 20px;
+    margin-top: 20px;
+    margin-bottom: 40px;
+}
+
+/* 响应式设计 - 适应不同屏幕分辨率 */
+@media (max-width: 1200px) {
+    .cards-container {
+        grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+        gap: 15px;
+    }
+}
+
+@media (max-width: 768px) {
+    .cards-container {
+        grid-template-columns: repeat(auto-fill, minmax(250px, 1fr));
+        gap: 12px;
+    }
+    
+    .container {
+        max-width: 100%;
+        padding: 0 10px;
+    }
+    
+    .control-panel {
+        flex-direction: column;
+        align-items: stretch;
+    }
+    
+    .control-left,
+    .control-right {
+        justify-content: center;
+    }
+    
+    .filter-container {
+        flex-direction: column;
+    }
+    
+    .filter-input {
+        min-width: auto;
+    }
+}
+
+@media (max-width: 480px) {
+    .cards-container {
+        grid-template-columns: 1fr;
+        gap: 10px;
+    }
+    
+    .record-card {
+        padding: 15px;
+    }
+    
+    .record-title {
+        font-size: 16px;
+    }
+    
+    .record-field {
+        flex-direction: column;
+        gap: 5px;
+    }
+}
+
+/* 卡片样式 */
+.record-card {
+    background-color: var(--card-bg);
+    border-radius: 12px;
+    box-shadow: 0 2px 4px var(--shadow-color);
+    padding: 20px;
+    transition: box-shadow 0.3s ease, transform 0.2s ease;
+    display: flex;
+    flex-direction: column;
+    height: auto;
+    min-height: 200px;
+    margin-bottom: 20px;
+}
+
+.record-card:hover {
+    box-shadow: 0 4px 8px var(--shadow-hover);
+    transform: translateY(-2px);
+}
+
+/* 卡片内容区域 */
+.card-content {
+    flex: 1;
+    margin-bottom: 15px;
+}
+
+/* 卡片操作区域 */
+.card-actions {
+    padding-top: 15px;
+    border-top: 1px solid var(--border-color);
+    display: flex;
+    justify-content: space-between;
+    gap: 10px;
+}
+
+/* 卡片按钮样式 */
+.card-btn {
+    display: inline-block;
+    padding: 8px 16px;
+    border-radius: 4px;
+    font-size: 14px;
+    font-weight: bold;
+    text-decoration: none;
+    transition: all 0.2s ease;
+    cursor: pointer;
+    border: none;
+    text-align: center;
+    min-width: 120px;
+}
+
+/* 构建按钮样式 */
+.build-btn {
+    background-color: var(--btn-bg);
+    color: white;
+}
+
+.build-btn:hover {
+    background-color: var(--btn-hover);
+    transform: translateY(-1px);
+    box-shadow: 0 2px 4px rgba(0,0,0,0.2);
+}
+
+/* Git按钮样式 */
+.git-btn {
+    background-color: var(--card-bg);
+    color: var(--btn-bg);
+    border: 1px solid var(--btn-bg);
+}
+
+.git-btn:hover {
+    background-color: var(--btn-bg);
+    color: white;
+}
+
+/* 卡片标题 */
+.record-title {
+    font-size: 18px;
+    font-weight: bold;
+    color: var(--text-color);
+    margin-bottom: 10px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+}
+
+/* 记录字段 */
+.record-field {
+    margin-bottom: 8px;
+    display: flex;
+}
+
+.field-label {
+    font-weight: bold;
+    min-width: 120px;
+    color: var(--label-color);
+}
+
+.field-value {
+    flex: 1;
+    color: var(--text-color);
+}
+
+/* 标签样式 */
+.tag {
+    display: inline-block;
+    background-color: var(--tag-bg);
+    color: white;
+    padding: 4px 12px;
+    border-radius: 16px;
+    font-size: 12px;
+    font-weight: bold;
+}
+
+.pipeline-iid-tag {
+    background-color: var(--tag-pipeline);
+}
+
+/* 控制面板样式 */
+.control-panel {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 20px;
+    flex-wrap: wrap;
+    gap: 15px;
+}
+
+.control-left {
+    display: flex;
+    align-items: center;
+    gap: 15px;
+}
+
+.control-right {
+    display: flex;
+    align-items: center;
+    gap: 20px;
+}
+
+/* 布局切换样式 */
+.layout-toggle {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.layout-label {
+    font-weight: bold;
+    color: var(--label-color);
+    font-size: 14px;
+}
+
+.layout-btn {
+    background-color: var(--card-bg);
+    color: var(--text-color);
+    border: 1px solid var(--border-color);
+    padding: 5px 12px;
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 14px;
+    transition: all 0.2s ease;
+}
+
+.layout-btn:hover {
+    background-color: var(--btn-bg);
+    color: white;
+    border-color: var(--btn-bg);
+}
+
+.layout-btn.active {
+    background-color: var(--btn-bg);
+    color: white;
+    border-color: var(--btn-bg);
+}
+
+/* 筛选容器 */
+.filter-container {
+    display: flex;
+    gap: 10px;
+    margin-bottom: 20px;
+    flex-wrap: wrap;
+}
+
+/* 筛选输入框 */
+.filter-input {
+    padding: 10px;
+    border: 1px solid var(--border-color);
+    border-radius: 5px;
+    font-size: 14px;
+    flex: 1;
+    min-width: 200px;
+    background-color: var(--card-bg);
+    color: var(--text-color);
+}
+
+/* 筛选按钮 */
+.filter-btn {
+    background-color: var(--btn-bg);
+    color: white;
+    border: none;
+    padding: 10px 20px;
+    border-radius: 5px;
+    cursor: pointer;
+    font-size: 14px;
+}
+
+.filter-btn:hover {
+    background-color: var(--btn-hover);
+}
+
+/* 刷新按钮 */
+.refresh-btn {
+    background-color: var(--refresh-btn);
+    color: white;
+    border: none;
+    padding: 10px 20px;
+    border-radius: 5px;
+    cursor: pointer;
+    font-size: 16px;
+    margin-bottom: 20px;
+}
+
+.refresh-btn:hover {
+    background-color: var(--refresh-hover);
+}
+
+/* 说明框 */
+.note {
+    background-color: var(--note-bg);
+    border-left: 4px solid var(--note-border);
+    padding: 15px;
+    margin-bottom: 20px;
+    border-radius: 4px;
+}
+
+/* 默认记录样式 */
+.default-record {
+    background-color: var(--default-bg);
+    border-left: 4px solid var(--default-border);
+}
