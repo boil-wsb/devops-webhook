@@ -168,6 +168,8 @@ h1 {
     height: auto;
     min-height: 200px;
     margin-bottom: 20px;
+    overflow-wrap: break-word;
+    word-break: break-word;
 }
 
 .record-card:hover {
@@ -179,6 +181,7 @@ h1 {
 .card-content {
     flex: 1;
     margin-bottom: 15px;
+    overflow-wrap: break-word;
 }
 
 /* 卡片操作区域 */
@@ -244,17 +247,22 @@ h1 {
 .record-field {
     margin-bottom: 8px;
     display: flex;
+    overflow-wrap: break-word;
 }
 
 .field-label {
     font-weight: bold;
     min-width: 120px;
     color: var(--label-color);
+    overflow-wrap: break-word;
+    word-break: break-all;
 }
 
 .field-value {
     flex: 1;
     color: var(--text-color);
+    overflow-wrap: break-word;
+    word-break: break-all;
 }
 
 /* 标签样式 */
