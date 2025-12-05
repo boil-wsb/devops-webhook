@@ -241,6 +241,14 @@ h1 {
     display: flex;
     align-items: center;
     justify-content: space-between;
+    flex-wrap: wrap;
+}
+
+/* 标签容器样式 */
+.tags-container {
+    display: flex;
+    align-items: center;
+    gap: 5px; /* 标签之间的空隙 */
 }
 
 /* 记录字段 */

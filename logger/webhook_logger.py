@@ -8,14 +8,14 @@ class BaseLogger:
     日志处理器基类
     提供日志系统的通用功能，包括目录创建、日志配置等
     """
-    _instance = None
+    _instances = {}  # 使用字典存储每个子类的实例
     
     def __new__(cls, log_dir='logs', log_name='base_logger'):
         # 单例模式实现，每个子类维护自己的实例
-        if cls._instance is None:
-            cls._instance = super(BaseLogger, cls).__new__(cls)
-            cls._instance._initialize(log_dir, log_name)
-        return cls._instance
+        if cls not in cls._instances:
+            cls._instances[cls] = super(BaseLogger, cls).__new__(cls)
+            cls._instances[cls]._initialize(log_dir, log_name)
+        return cls._instances[cls]
     
     def _initialize(self, log_dir, log_name):
         """
@@ -61,16 +61,21 @@ class BaseLogger:
         创建按月滚动的文件处理器
         每月午夜切换日志文件，每月一个新文件，保留12个月
         """
+        import re
         log_file = os.path.join(self.log_dir, f'{self.log_name}.log')
         file_handler = TimedRotatingFileHandler(
             filename=log_file,
             when='M',         # 按月滚动
             interval=1,       # 每1个月一个新文件
             backupCount=12,   # 保留12个月的日志
-            encoding='utf-8'
+            encoding='utf-8',
+            delay=True        # 延迟打开文件，避免覆盖已存在的日志文件
         )
         # 设置文件名的日期格式为月份
         file_handler.suffix = "%Y-%m"
+        # 设置匹配后缀的正则表达式，确保正确识别已存在的备份文件
+        # 匹配格式为 .2025-12 的后缀
+        file_handler.extMatch = re.compile(r"^\.\d{4}-\d{2}$")
         
         return file_handler
     

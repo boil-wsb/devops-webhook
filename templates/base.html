@@ -61,10 +61,12 @@
                     <div class="card-content">
                         <div class="record-title">
                             {{ record.project_name or 'N/A' }}
-                            {% if record.branch %}
-                                <span class="tag branch-tag">{{ record.branch | replace('refs/heads/', '') }}</span>
-                            {% endif %}
-                            <span class="tag pipeline-iid-tag">{{ record.pipeline_iid or 'N/A' }}</span>
+                            <div class="tags-container">
+                                {% if record.branch %}
+                                    <span class="tag branch-tag">{{ record.branch | replace('refs/heads/', '') }}</span>
+                                {% endif %}
+                                <span class="tag pipeline-iid-tag">{{ record.pipeline_iid or 'N/A' }}</span>
+                            </div>
                         </div>
                         <div class="record-field">
                             <span class="field-label">命名空间:</span>
