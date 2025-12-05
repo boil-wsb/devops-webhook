@@ -343,4 +343,55 @@ def register_routes(app):
                 'status': 'error',
                 'message': str(e)
             }), 500
+    
+    @app.route('/push_records/latest/<path:git_url>', methods=['GET'])
+    def latest_push_record_route(git_url):
+        """
+        获取特定项目的最近一次push记录
+        """
+        from src.services import push_records, push_records_lock
+        import json
+        import os
+        import urllib.parse
+        
+        try:
+            # 解码URL，因为URL中的斜杠等特殊字符会被编码
+            decoded_git_url = urllib.parse.unquote(git_url)
+            
+            # 先从内存中获取
+            with push_records_lock:
+                project_push_records = [
+                    record for record in push_records 
+                    if record.get('git_url') == decoded_git_url
+                ]
+            
+            # 如果内存中没有，从文件中读取
+            if not project_push_records:
+                if os.path.exists('push_records.json'):
+                    with open('push_records.json', 'r', encoding='utf-8') as f:
+                        file_records = json.load(f)
+                        project_push_records = [
+                            record for record in file_records 
+                            if record.get('git_url') == decoded_git_url
+                        ]
+            
+            # 按时间排序，获取最近一次记录
+            if project_push_records:
+                # 假设records是按时间顺序添加的，最后一个就是最新的
+                latest_record = project_push_records[-1]
+                return jsonify({
+                    'status': 'success',
+                    'data': latest_record
+                }), 200
+            else:
+                return jsonify({
+                    'status': 'success',
+                    'data': None,
+                    'message': f'No push records found for git_url: {decoded_git_url}'
+                }), 200
+        except Exception as e:
+            return jsonify({
+                'status': 'error',
+                'message': str(e)
+            }), 500
 

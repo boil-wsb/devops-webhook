@@ -40,12 +40,14 @@ def process_webhook(request, route_name, subpath=None):
                 ref = payload.get('ref', '')
                 user_name = payload.get('user_name', '')
                 commits = payload.get('commits', [])
+                git_url = payload.get('project', {}).get('web_url', '')
                 
                 # 构建 push 事件记录
                 push_record = {
                     'project_name': project_name,
                     'ref': ref,
                     'user_name': user_name,
+                    'git_url': git_url,
                     'commits': [
                         {
                             'url': commit.get('url', ''),

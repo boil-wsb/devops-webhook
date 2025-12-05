@@ -149,6 +149,8 @@ logs/
 # Project specific ignores
 config.conf
 .env
+project.json
+push_records.json
 
 # Docker
 docker-compose.override.yml
