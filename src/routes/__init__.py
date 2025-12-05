@@ -411,8 +411,10 @@ def register_routes(app):
             
             # 按时间排序，获取最近10条记录
             if project_push_records:
-                # 假设records是按时间顺序添加的，最后10个就是最新的
-                latest_records = project_push_records[-10:]
+                # 按push_time从晚到早排序
+                project_push_records.sort(key=lambda x: x.get('push_time', ''), reverse=True)
+                # 获取最新的10条记录
+                latest_records = project_push_records[:10]
                 return jsonify({
                     'status': 'success',
                     'data': latest_records,
