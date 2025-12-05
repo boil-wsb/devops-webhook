@@ -403,3 +403,297 @@ h1 {
     background-color: var(--default-bg);
     border-left: 4px solid var(--default-border);
 }
+
+/* 模态弹窗样式 */
+.modal {
+    display: none;
+    position: fixed;
+    z-index: 1000;
+    left: 0;
+    top: 0;
+    width: 100%;
+    height: 100%;
+    overflow: auto;
+    background-color: rgba(0,0,0,0.4);
+}
+
+.modal-content {
+    background-color: var(--card-bg);
+    margin: 5% auto;
+    padding: 20px;
+    border: 1px solid var(--border-color);
+    width: 80%;
+    max-width: 800px;
+    border-radius: 8px;
+    box-shadow: 0 4px 8px var(--shadow-color), 0 6px 20px var(--shadow-color);
+    color: var(--text-color);
+}
+
+/* 关闭按钮 */
+.close {
+    color: var(--label-color);
+    float: right;
+    font-size: 28px;
+    font-weight: bold;
+    cursor: pointer;
+}
+
+.close:hover,
+.close:focus {
+    color: var(--text-color);
+    text-decoration: none;
+    cursor: pointer;
+}
+
+/* 模态弹窗内容样式 */
+.push-record-detail {
+    margin-top: 20px;
+}
+
+.detail-field {
+    margin-bottom: 12px;
+    display: flex;
+    align-items: center;
+}
+
+.detail-label {
+    font-weight: bold;
+    margin-right: 10px;
+    width: 120px;
+    color: var(--label-color);
+}
+
+.detail-value {
+    flex: 1;
+    word-break: break-all;
+}
+
+/* 提交记录样式 */
+.commits-list {
+    margin-top: 15px;
+    border-top: 1px solid var(--border-color);
+    padding-top: 15px;
+}
+
+.commit-item {
+    margin-bottom: 15px;
+    padding: 10px;
+    background-color: var(--note-bg);
+    border-radius: 4px;
+}
+
+.commit-message {
+    margin-bottom: 8px;
+    font-weight: 500;
+    color: var(--text-color);
+}
+
+.commit-meta {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    font-size: 14px;
+    color: var(--label-color);
+}
+
+.commit-url {
+    color: var(--btn-bg);
+    text-decoration: none;
+}
+
+.commit-url:hover {
+    text-decoration: underline;
+}
+
+/* 状态样式 */
+.loading,
+.no-record,
+.error,
+.no-commits {
+    text-align: center;
+    padding: 20px;
+    color: var(--label-color);
+}
+
+.loading {
+    color: var(--btn-bg);
+}
+
+.error {
+    color: #f5222d;
+}
+
+/* 分支标签样式 */
+.branch-tag {
+    background-color: #52c41a;
+    color: white;
+    margin-right: 5px;
+}
+
+/* 深色模式适配 */
+[data-theme="dark"] .modal-content {
+    background-color: var(--card-bg);
+    color: var(--text-color);
+}
+
+[data-theme="dark"] .detail-label {
+    color: var(--label-color);
+}
+
+[data-theme="dark"] .commit-item {
+    background-color: var(--card-bg);
+    border: 1px solid var(--border-color);
+}
+
+[data-theme="dark"] .commit-message {
+    color: var(--text-color);
+}
+
+[data-theme="dark"] .commit-meta {
+    color: var(--label-color);
+}
+
+/* 深色模式下的标签样式 */
+[data-theme="dark"] .branch-tag {
+    background-color: #389e0d;
+}
+
+/* 按钮样式 */
+.info-btn {
+    background-color: var(--btn-bg);
+    color: white;
+}
+
+.info-btn:hover {
+    background-color: var(--btn-hover);
+}
+
+/* push记录容器样式 */
+.push-records-container {
+    max-height: 600px;
+    overflow-y: auto;
+}
+
+.push-record-item {
+    margin-bottom: 20px;
+    padding: 15px;
+    background-color: var(--note-bg);
+    border-radius: 8px;
+}
+
+.push-record-item h3 {
+    margin-top: 0;
+    margin-bottom: 10px;
+    color: var(--btn-bg);
+}
+
+.push-record-item h4 {
+    margin-top: 10px;
+    margin-bottom: 8px;
+    color: var(--text-color);
+}
+
+/* 流水线ID样式 */
+.pipeline-id {
+    margin: 0 10px;
+    color: #52c41a;
+    font-weight: 500;
+}
+
+/* 深色模式适配 */
+[data-theme="dark"] .push-record-item {
+    background-color: var(--card-bg);
+    border: 1px solid var(--border-color);
+}
+
+[data-theme="dark"] .push-record-item h3 {
+    color: var(--btn-bg);
+}
+
+[data-theme="dark"] .push-record-item h4 {
+    color: var(--text-color);
+}
+
+[data-theme="dark"] .pipeline-id {
+    color: #73d13d;
+}
+
+/* 响应式设计 */
+@media (max-width: 768px) {
+    .modal-content {
+        width: 95%;
+        margin: 10% auto;
+    }
+    
+    .detail-field {
+        flex-direction: column;
+        align-items: flex-start;
+    }
+    
+    .detail-label {
+        width: auto;
+        margin-bottom: 5px;
+    }
+}
+
+/* push记录头部样式 */
+.push-record-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 15px;
+}
+
+/* 流水线标签样式 */
+.pipeline-tags {
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+}
+
+.pipeline-tag {
+    background-color: var(--tag-pipeline);
+    color: white;
+    margin-right: 5px;
+}
+
+/* 切换提交记录按钮 */
+.toggle-commits-btn {
+    background-color: var(--note-bg);
+    color: var(--text-color);
+    border: 1px solid var(--border-color);
+    padding: 8px 12px;
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 14px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-top: 10px;
+    margin-bottom: 10px;
+    width: 100%;
+    justify-content: center;
+}
+
+.toggle-commits-btn:hover {
+    background-color: var(--btn-bg);
+    color: white;
+    border-color: var(--btn-bg);
+}
+
+/* 更多提交记录容器 */
+.more-commits-container {
+    margin-top: 10px;
+}
+
+/* 更多提交记录 */
+.more-commits {
+    margin-top: 10px;
+    padding-left: 20px;
+    border-left: 2px solid var(--border-color);
+}
+
+/* 提交记录项目 */
+.commit-item {
+    margin-bottom: 10px;
+}

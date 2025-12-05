@@ -13,9 +13,29 @@ def record_push_event(push_record, push_records, push_records_lock):
         push_records_lock: 锁对象，确保线程安全
     """
     try:
+        # 处理push_record
+        processed_record = push_record.copy()
+        
+        # 1. 按timestamp从晚到早排序commits记录
+        if isinstance(processed_record.get('commits'), list):
+            # 按timestamp从晚到早排序
+            processed_record['commits'].sort(key=lambda x: x.get('timestamp', ''), reverse=True)
+            
+            # 2. 使用commits的最晚一项记录作为push_records的push时间
+            if processed_record['commits']:
+                # 获取最晚的commit时间
+                latest_commit = processed_record['commits'][0]
+                processed_record['push_time'] = latest_commit.get('timestamp', '')
+            else:
+                # 如果没有commits，使用当前时间
+                processed_record['push_time'] = datetime.now().isoformat()
+        else:
+            # 如果commits不是列表，使用当前时间
+            processed_record['push_time'] = datetime.now().isoformat()
+        
         with push_records_lock:
             # 添加到全局列表
-            push_records.append(push_record)
+            push_records.append(processed_record)
             
             # 安全保存到文件：先读取现有内容，再合并写入
             file_path = 'push_records.json'
@@ -66,6 +86,8 @@ def record_pipeline_event(payload, subpath, pipeline_records, pipeline_records_l
         pipeline_iid = payload.get('object_attributes', {}).get('iid', '')
         latest_triggered_by = payload.get('user', {}).get('name', 'unknown')
         record_time = payload.get('object_attributes', {}).get('created_at', datetime.now().isoformat())
+        branch = payload.get('object_attributes', {}).get('ref', '')
+        commit_url = payload.get('commit', {}).get('url', '')
         
         # 如果缺少必要信息，直接返回
         if not namespace or not project_name:
@@ -97,7 +119,9 @@ def record_pipeline_event(payload, subpath, pipeline_records, pipeline_records_l
             'git_url': git_url,
             'subpath': subpath,
             'latest_triggered_by': latest_triggered_by,
-            'record_time': record_time
+            'record_time': record_time,
+            'branch': branch,
+            'commit_url': commit_url
         }
         
         # 使用锁确保线程安全
@@ -125,6 +149,34 @@ def record_pipeline_event(payload, subpath, pipeline_records, pipeline_records_l
                     json.dump(project_data, f, ensure_ascii=False, indent=2)
             except Exception as e:
                 print(f"写入project.json文件时发生错误: {str(e)}")
+            
+            # 检查push_records.json是否存在，并且存在一致的commit url记录，将pipeline_iid插入对应记录内
+            try:
+                push_file_path = 'push_records.json'
+                if os.path.exists(push_file_path) and commit_url:
+                    # 读取push_records.json
+                    with open(push_file_path, 'r', encoding='utf-8') as f:
+                        push_records = json.load(f)
+                    
+                    # 确保push_records是列表
+                    if isinstance(push_records, list):
+                        updated = False
+                        for push_record in push_records:
+                            # 检查push_record是否包含commits字段，并且commits是列表
+                            if isinstance(push_record.get('commits'), list):
+                                for commit in push_record['commits']:
+                                    # 检查commit url是否匹配
+                                    if commit.get('url') == commit_url:
+                                        # 插入pipeline_iid
+                                        commit['pipeline_iid'] = pipeline_iid
+                                        updated = True
+                        
+                        # 如果有更新，写入文件
+                        if updated:
+                            with open(push_file_path, 'w', encoding='utf-8') as f:
+                                json.dump(push_records, f, ensure_ascii=False, indent=2)
+            except Exception as e:
+                print(f"更新push_records.json文件时发生错误: {str(e)}")
             
         
     except Exception as e:

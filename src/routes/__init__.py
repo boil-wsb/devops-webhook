@@ -381,7 +381,7 @@ def register_routes(app):
     @app.route('/push_records/latest/<path:git_url>', methods=['GET'])
     def latest_push_record_route(git_url):
         """
-        获取特定项目的最近一次push记录
+        获取特定项目的最近10条push记录
         """
         from src.services import push_records, push_records_lock
         import json
@@ -409,18 +409,19 @@ def register_routes(app):
                             if record.get('git_url') == decoded_git_url
                         ]
             
-            # 按时间排序，获取最近一次记录
+            # 按时间排序，获取最近10条记录
             if project_push_records:
-                # 假设records是按时间顺序添加的，最后一个就是最新的
-                latest_record = project_push_records[-1]
+                # 假设records是按时间顺序添加的，最后10个就是最新的
+                latest_records = project_push_records[-10:]
                 return jsonify({
                     'status': 'success',
-                    'data': latest_record
+                    'data': latest_records,
+                    'count': len(latest_records)
                 }), 200
             else:
                 return jsonify({
                     'status': 'success',
-                    'data': None,
+                    'data': [],
                     'message': f'No push records found for git_url: {decoded_git_url}'
                 }), 200
         except Exception as e:
