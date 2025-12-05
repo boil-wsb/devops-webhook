@@ -321,10 +321,37 @@ def register_routes(app):
                 print("添加了默认示例记录")
         
         # 排序：先按record_time降序，无record_time的按project_name升序
-        records_list.sort(key=lambda x: (
-            -datetime.fromisoformat(x.get('record_time')) if x.get('record_time') else datetime.min,
-            x.get('project_name', '').lower()
-        ))
+        def get_sort_key(x):
+            project_name = x.get('project_name', '').lower()
+            record_time = x.get('record_time')
+            
+            if not record_time:
+                # 没有record_time的记录，使用0作为默认时间戳（对应1970-01-01 00:00:00 UTC）
+                return (0, project_name)
+            
+            try:
+                # 尝试直接解析ISO格式
+                if 'T' in record_time and 'Z' in record_time:
+                    # ISO 8601格式，如：2023-01-01T00:00:00.000Z
+                    dt = datetime.strptime(record_time, '%Y-%m-%dT%H:%M:%S.%fZ')
+                    return (-dt.timestamp(), project_name)
+                elif 'T' in record_time:
+                    # ISO 8601格式，如：2023-01-01T00:00:00.000
+                    dt = datetime.strptime(record_time.split('.')[0], '%Y-%m-%dT%H:%M:%S')
+                    return (-dt.timestamp(), project_name)
+                elif '+' in record_time:
+                    # 带时区的普通格式，如：2023-01-01 00:00:00 +0800
+                    dt = datetime.strptime(record_time[:19], '%Y-%m-%d %H:%M:%S')
+                    return (-dt.timestamp(), project_name)
+                else:
+                    # 普通格式，如：2023-01-01 00:00:00
+                    dt = datetime.strptime(record_time[:19], '%Y-%m-%d %H:%M:%S')
+                    return (-dt.timestamp(), project_name)
+            except Exception as e:
+                # 所有解析都失败，使用0作为默认时间戳
+                return (0, project_name)
+        
+        records_list.sort(key=get_sort_key)
         
         print(f"生成的HTML页面包含 {len(records_list)} 条记录")
         return render_template('base.html', records=records_list)
