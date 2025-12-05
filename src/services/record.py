@@ -65,6 +65,7 @@ def record_pipeline_event(payload, subpath, pipeline_records, pipeline_records_l
         git_url = payload.get('project', {}).get('web_url', '')
         pipeline_iid = payload.get('object_attributes', {}).get('iid', '')
         latest_triggered_by = payload.get('user', {}).get('name', 'unknown')
+        record_time = payload.get('object_attributes', {}).get('created_at', datetime.now().isoformat())
         
         # 如果缺少必要信息，直接返回
         if not namespace or not project_name:
@@ -95,7 +96,8 @@ def record_pipeline_event(payload, subpath, pipeline_records, pipeline_records_l
             'pipeline_iid': pipeline_iid,
             'git_url': git_url,
             'subpath': subpath,
-            'latest_triggered_by': latest_triggered_by
+            'latest_triggered_by': latest_triggered_by,
+            'record_time': record_time
         }
         
         # 使用锁确保线程安全

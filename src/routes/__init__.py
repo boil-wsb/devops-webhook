@@ -280,6 +280,7 @@ def register_routes(app):
         支持按命名空间筛选：/pipelines/records/view/PD4
         """
         from src.services import pipeline_records, pipeline_records_lock
+        from datetime import datetime
         
         with pipeline_records_lock:
             # 获取所有记录的列表
@@ -318,7 +319,13 @@ def register_routes(app):
                     }
                 ]
                 print("添加了默认示例记录")
-            
+        
+        # 排序：先按record_time降序，无record_time的按project_name升序
+        records_list.sort(key=lambda x: (
+            -datetime.fromisoformat(x.get('record_time')) if x.get('record_time') else datetime.min,
+            x.get('project_name', '').lower()
+        ))
+        
         print(f"生成的HTML页面包含 {len(records_list)} 条记录")
         return render_template('base.html', records=records_list)
     
