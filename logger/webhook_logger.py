@@ -64,11 +64,19 @@ class BaseLogger:
         每月午夜切换日志文件，每月一个新文件，保留12个月
         """
         import re
+        import os
+        import time
+        
+        # 日志文件路径
         log_file = os.path.join(self.log_dir, f'{self.log_name}.log')
+        
+        # 注意：TimedRotatingFileHandler的when参数中，'M'表示分钟，'midnight'表示每天午夜
+        # 要实现自然月轮转，需要在每月1号午夜触发，因此使用when='midnight'和interval=1
+        # 并结合自定义的轮转检查逻辑
         file_handler = TimedRotatingFileHandler(
             filename=log_file,
-            when='M',         # 按月滚动
-            interval=1,       # 每1个月一个新文件
+            when='midnight',  # 每天午夜检查
+            interval=1,       # 每1天检查一次
             backupCount=12,   # 保留12个月的日志
             encoding='utf-8',
             delay=True        # 延迟打开文件，避免覆盖已存在的日志文件
@@ -76,8 +84,39 @@ class BaseLogger:
         # 设置文件名的日期格式为月份
         file_handler.suffix = "%Y-%m"
         # 设置匹配后缀的正则表达式，确保正确识别已存在的备份文件
-        # 匹配格式为 .2025-12 的后缀
-        file_handler.extMatch = re.compile(r"^\.\d{4}-\d{2}$")
+        # 匹配格式为 .2025-12 或 .2025-12.gz
+        file_handler.extMatch = re.compile(r"^\.\d{4}-\d{2}(\.gz)?$")
+        
+        # 重写shouldRollover方法，实现按月轮转逻辑
+        # 只有当当前日期是1号且当前时间是午夜时才轮转
+        original_should_rollover = file_handler.shouldRollover
+        
+        def custom_should_rollover(record):
+            # 获取当前日期和日志文件的修改日期
+            current_time = int(time.time())
+            current_date = time.localtime(current_time)
+            
+            # 如果当前不是1号，不轮转
+            if current_date.tm_mday != 1:
+                return False
+            
+            try:
+                # 获取日志文件的修改时间
+                file_mtime = os.path.getmtime(file_handler.baseFilename)
+                file_date = time.localtime(file_mtime)
+                
+                # 如果日志文件的月份与当前月份相同，不轮转
+                if file_date.tm_year == current_date.tm_year and file_date.tm_mon == current_date.tm_mon:
+                    return False
+                    
+                # 否则，执行轮转
+                return True
+            except (OSError, IOError):
+                # 如果无法获取文件信息，不轮转
+                return False
+        
+        # 应用自定义的轮转检查逻辑
+        file_handler.shouldRollover = custom_should_rollover
         
         return file_handler
     

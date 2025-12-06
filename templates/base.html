@@ -241,20 +241,13 @@
                                 html += `
                                     <div class="push-record-item">
                                         <div class="push-record-header">
-                                            <h4>${record.push_time || 'N/A'}</h4>
-                                            ${hasPipelineId ? `<div class="pipeline-tags">
-                                                ${pipelineIds.map(id => `<span class="tag pipeline-tag">流水线ID: ${id}</span>`).join('')}
-                                            </div>` : ''}
+                                            <h4>${record.ref || 'N/A'}</h4>
+                                            <div class="pipeline-tags">
+                                                ${record.user_name ? `<span class="tag user-tag">${record.user_name}</span>` : ''}
+                                                ${hasPipelineId ? pipelineIds.map(id => `<span class="tag pipeline-tag">流水线ID: ${id}</span>`).join('') : ''}
+                                            </div>
                                         </div>
                                         <div class="push-record-detail">
-                                            <div class="detail-field">
-                                                <span class="detail-label">分支:</span>
-                                                <span class="detail-value">${record.ref || 'N/A'}</span>
-                                            </div>
-                                            <div class="detail-field">
-                                                <span class="detail-label">触发人:</span>
-                                                <span class="detail-value">${record.user_name || 'N/A'}</span>
-                                            </div>
                                             <div class="commits-list">
                                 `;
                                 

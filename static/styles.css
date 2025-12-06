@@ -647,9 +647,10 @@ h1 {
 /* push记录头部样式 */
 .push-record-header {
     display: flex;
-    justify-content: space-between;
+    justify-content: flex-start;
     align-items: center;
     margin-bottom: 15px;
+    gap: 10px; /* 标题和标签之间的间距 */
 }
 
 /* 流水线标签样式 */
@@ -663,6 +664,18 @@ h1 {
     background-color: var(--tag-pipeline);
     color: white;
     margin-right: 5px;
+}
+
+/* 用户标签样式 - 橙色 */
+.user-tag {
+    background-color: #ff9800;
+    color: white;
+    margin-right: 5px;
+}
+
+/* 深色模式下的用户标签样式 */
+[data-theme="dark"] .user-tag {
+    background-color: #f57c00;
 }
 
 /* 切换提交记录按钮 */
