@@ -4,6 +4,8 @@ from src.utils import format_duration, calculate_interval, convert_utc_to_utc8, 
 from src.config import WEBHOOK_CONFIG, DEFAULT_TARGET_URL
 
 
+
+
 def send_formatted_message(target_url, message):
     """
     将格式化后的消息发送到指定URL
@@ -19,6 +21,10 @@ def format_message(payload, running_builds=None, running_builds_lock=None, route
     """
     格式化消息
     """
+    import logging
+    # 使用标准的logging模块，避免导入问题
+    app_logger = logging.getLogger('app_logger')
+    
     status = payload['object_attributes']['status']
     pipeline_id = payload['object_attributes']['id']
     pipeline_iid = payload['object_attributes']['iid']
@@ -46,7 +52,7 @@ def format_message(payload, running_builds=None, running_builds_lock=None, route
                 pipeline_iid_prev = record['pipeline_iid']
                 break  # 只取第一条记录
         else:
-            print(f"未找到相同project_name={project_name}, branch={branch}的其他pipeline记录")
+            app_logger.info(f"未找到相同project_name={project_name}, branch={branch}的其他pipeline记录")
 
     if 'running' == status:
         # 记录运行中的构建
@@ -92,11 +98,11 @@ def format_message(payload, running_builds=None, running_builds_lock=None, route
                         'route_name': route_name
                     }
             except Exception as e:
-                print(f"❌ 记录运行中构建失败: {str(e)}")
+                app_logger.error(f"❌ 记录运行中构建失败: {str(e)}")
                 import traceback
-                traceback.print_exc()
+                app_logger.error(traceback.format_exc())
         else:
-            print(f"❌ running_builds或running_builds_lock为None，无法记录运行中构建")
+            app_logger.warning(f"❌ running_builds或running_builds_lock为None，无法记录运行中构建")
     elif 'success' == status or 'failed' == status or 'canceled' == status:
         # 构建完成或取消，从运行中构建记录中移除
         
@@ -106,9 +112,9 @@ def format_message(payload, running_builds=None, running_builds_lock=None, route
                 with running_builds_lock:
                     if pipeline_iid in running_builds:
                         del running_builds[pipeline_iid]
-                        print(f"已移除完成构建: {pipeline_iid}")
+                        app_logger.info(f"已移除完成构建: {pipeline_iid}")
             except Exception as e:
-                print(f"移除完成构建失败: {str(e)}")
+                app_logger.error(f"移除完成构建失败: {str(e)}")
         
         # 对于canceled状态，不需要生成消息
         if 'canceled' == status:

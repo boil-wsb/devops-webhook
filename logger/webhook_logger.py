@@ -3,6 +3,8 @@ import os
 from datetime import datetime
 from logging.handlers import TimedRotatingFileHandler
 
+# 导入app_logger用于记录日志系统本身的错误
+
 class BaseLogger:
     """
     日志处理器基类
@@ -36,7 +38,7 @@ class BaseLogger:
             if not os.path.exists(self.log_dir):
                 os.makedirs(self.log_dir)
         except Exception as e:
-            print(f"Warning: Failed to create log directory {self.log_dir}: {str(e)}")
+            logging.warning(f"Warning: Failed to create log directory {self.log_dir}: {str(e)}")
             # 如果无法创建目录，使用当前目录作为备选
             self.log_dir = '.'
     
@@ -146,7 +148,7 @@ class WebhookLogger(BaseLogger):
             self.logger.info(str(log_entry))
         except Exception as e:
             # 日志记录失败时的错误处理
-            print(f"Error writing webhook log: {str(e)}")
+            logging.error(f"Error writing webhook log: {str(e)}")
 
 class MonitorLogger(BaseLogger):
     """
@@ -196,7 +198,7 @@ class MonitorLogger(BaseLogger):
             self.logger.info(str(log_entry))
         except Exception as e:
             # 日志记录失败时的错误处理
-            print(f"Error writing monitor event log: {str(e)}")
+            logging.error(f"Error writing monitor event log: {str(e)}")
 
 
 class AccessLogger(BaseLogger):
@@ -256,11 +258,92 @@ class AccessLogger(BaseLogger):
             self.logger.info(log_entry)
         except Exception as e:
             # 日志记录失败时的错误处理
-            print(f"Error writing access log: {str(e)}")
+            logging.error(f"Error writing access log: {str(e)}")
 
-# 创建全局监控日志实例
-monitor_logger = MonitorLogger()
-# 创建全局日志实例
-webhook_logger = WebhookLogger()
-# 创建全局访问日志实例
-access_logger = AccessLogger()
+
+class AppLogger(BaseLogger):
+    """
+    应用程序通用日志处理器
+    用于记录应用程序的一般日志信息，支持按日期滚动日志文件
+    """
+    
+    def __new__(cls, log_dir='logs', log_name='app'):
+        # 重写__new__方法以使用自定义的日志名称
+        return super().__new__(cls, log_dir, log_name)
+    
+    def _configure_logger(self):
+        """
+        配置日志记录器，设置按日期滚动的文件处理器和控制台输出
+        """
+        logger = logging.getLogger('app_logger')
+        logger.setLevel(logging.INFO)
+        
+        # 清除已有的处理器，避免重复添加
+        for handler in logger.handlers[:]:
+            logger.removeHandler(handler)
+        
+        # 创建文件处理器
+        file_handler = self._create_file_handler('app_logger')
+        formatter = self._create_base_formatter()
+        file_handler.setFormatter(formatter)
+        logger.addHandler(file_handler)
+        
+        # 添加控制台输出
+        console_handler = self._create_console_handler()
+        console_handler.setFormatter(formatter)
+        logger.addHandler(console_handler)
+        
+        return logger
+    
+    def info(self, message):
+        """
+        记录信息级别的日志
+        Args:
+            message: 日志信息
+        """
+        self.logger.info(message)
+    
+    def warning(self, message):
+        """
+        记录警告级别的日志
+        Args:
+            message: 日志信息
+        """
+        self.logger.warning(message)
+    
+    def error(self, message):
+        """
+        记录错误级别的日志
+        Args:
+            message: 日志信息
+        """
+        self.logger.error(message)
+    
+    def debug(self, message):
+        """
+        记录调试级别的日志
+        Args:
+            message: 日志信息
+        """
+        self.logger.debug(message)
+
+# 延迟创建全局日志实例，避免循环导入问题
+monitor_logger = None
+webhook_logger = None
+access_logger = None
+app_logger = None
+
+# 在模块导入完成后再创建实例
+def _init_loggers():
+    global monitor_logger, webhook_logger, access_logger, app_logger
+    if not monitor_logger:
+        monitor_logger = MonitorLogger()
+    if not webhook_logger:
+        webhook_logger = WebhookLogger()
+    if not access_logger:
+        access_logger = AccessLogger()
+    if not app_logger:
+        app_logger = AppLogger()
+
+# 初始化日志实例
+_init_loggers()

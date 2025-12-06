@@ -12,6 +12,10 @@ def record_push_event(push_record, push_records, push_records_lock):
         push_records: 全局push事件列表
         push_records_lock: 锁对象，确保线程安全
     """
+    import logging
+    # 使用标准的logging模块，避免导入问题
+    app_logger = logging.getLogger('app_logger')
+    
     try:
         # 处理push_record
         processed_record = push_record.copy()
@@ -33,42 +37,37 @@ def record_push_event(push_record, push_records, push_records_lock):
             # 如果commits不是列表，使用当前时间
             processed_record['push_time'] = datetime.now().isoformat()
         
+        # 3. 保留现有记录中已有的pipeline_iid字段
+        # 遍历当前push_record中的每个commit
+        for i, commit in enumerate(processed_record['commits']):
+            commit_url = commit.get('url', '')
+            if commit_url:
+                # 遍历所有现有的push记录，寻找相同的commit url
+                for existing_push_record in push_records:
+                    if isinstance(existing_push_record.get('commits'), list):
+                        for existing_commit in existing_push_record['commits']:
+                            if existing_commit.get('url') == commit_url and 'pipeline_iid' in existing_commit:
+                                # 找到相同的commit url，保留现有的pipeline_iid字段
+                                processed_record['commits'][i]['pipeline_iid'] = existing_commit['pipeline_iid']
+                                break
+    
         with push_records_lock:
             # 添加到全局列表
             push_records.append(processed_record)
             
-            # 安全保存到文件：先读取现有内容，再合并写入
-            file_path = 'push_records.json'
-            existing_records = []
-            
-            # 尝试读取现有文件内容
-            if os.path.exists(file_path):
-                try:
-                    with open(file_path, 'r', encoding='utf-8') as f:
-                        existing_records = json.load(f)
-                except (json.JSONDecodeError, IOError) as e:
-                    print(f"读取现有push记录文件失败，将创建新文件: {str(e)}")
-                    existing_records = []
-            
-            # 确保existing_records是列表
-            if not isinstance(existing_records, list):
-                existing_records = []
-            
-            # 合并记录：使用全局列表，确保数据一致性
-            # 注意：这里使用push_records而不是existing_records，因为push_records包含了最新的所有记录
-            # 这样可以确保文件内容与内存中的数据完全一致
-            all_records = push_records
-            
             # 写入文件
+            file_path = 'push_records.json'
             with open(file_path, 'w', encoding='utf-8') as f:
-                json.dump(all_records, f, ensure_ascii=False, indent=2)
+                json.dump(push_records, f, ensure_ascii=False, indent=2)
             
+        # 使用print语句代替app_logger，避免导入问题
         print(f"已记录push事件: {push_record['project_name']} {push_record['ref']}")
     except Exception as e:
-        print(f"记录push事件时发生错误: {str(e)}")
+        # 使用标准的logging模块记录错误
+        app_logger.error(f"记录push事件时发生错误: {str(e)}")
 
 
-def record_pipeline_event(payload, subpath, pipeline_records, pipeline_records_lock):
+def record_pipeline_event(payload, subpath, pipeline_records, pipeline_records_lock, push_records, push_records_lock):
     """
     记录流水线事件到全局变量中
     Args:
@@ -76,7 +75,13 @@ def record_pipeline_event(payload, subpath, pipeline_records, pipeline_records_l
         subpath: 路由的子路径
         pipeline_records: 全局流水线记录字典
         pipeline_records_lock: 锁对象，确保线程安全
+        push_records: 全局push事件列表
+        push_records_lock: 锁对象，确保线程安全
     """
+    import logging
+    # 使用标准的logging模块，避免导入问题
+    app_logger = logging.getLogger('app_logger')
+    
     try:
         # 提取所需信息
         namespace = payload.get('project', {}).get('namespace', '')
@@ -148,36 +153,37 @@ def record_pipeline_event(payload, subpath, pipeline_records, pipeline_records_l
                 with open('project.json', 'w', encoding='utf-8') as f:
                     json.dump(project_data, f, ensure_ascii=False, indent=2)
             except Exception as e:
-                print(f"写入project.json文件时发生错误: {str(e)}")
+                # 使用标准的logging模块记录错误
+                app_logger.error(f"写入project.json文件时发生错误: {str(e)}")
             
             # 检查push_records.json是否存在，并且存在一致的commit url记录，将pipeline_iid插入对应记录内
-            try:
-                push_file_path = 'push_records.json'
-                if os.path.exists(push_file_path) and commit_url:
-                    # 读取push_records.json
-                    with open(push_file_path, 'r', encoding='utf-8') as f:
-                        push_records = json.load(f)
-                    
-                    # 确保push_records是列表
-                    if isinstance(push_records, list):
-                        updated = False
-                        for push_record in push_records:
-                            # 检查push_record是否包含commits字段，并且commits是列表
-                            if isinstance(push_record.get('commits'), list):
-                                for commit in push_record['commits']:
-                                    # 检查commit url是否匹配
-                                    if commit.get('url') == commit_url:
-                                        # 插入pipeline_iid
-                                        commit['pipeline_iid'] = pipeline_iid
-                                        updated = True
-                        
-                        # 如果有更新，写入文件
-                        if updated:
-                            with open(push_file_path, 'w', encoding='utf-8') as f:
-                                json.dump(push_records, f, ensure_ascii=False, indent=2)
-            except Exception as e:
-                print(f"更新push_records.json文件时发生错误: {str(e)}")
+        try:
+            push_file_path = 'push_records.json'
+            if os.path.exists(push_file_path) and commit_url:
+                # 使用全局的push_records列表，而不是从文件中重新读取
+                # 这样可以确保全局列表与文件内容一致
+                updated = False
+                for push_record in push_records:
+                    # 检查push_record是否包含commits字段，并且commits是列表
+                    if isinstance(push_record.get('commits'), list):
+                        for commit in push_record['commits']:
+                            # 检查commit url是否匹配
+                            if commit.get('url') == commit_url:
+                                # 插入pipeline_iid
+                                commit['pipeline_iid'] = pipeline_iid
+                                updated = True
+                
+                # 如果有更新，写入文件
+                if updated:
+                    # 写入文件时使用锁确保线程安全
+                    with push_records_lock:
+                        with open(push_file_path, 'w', encoding='utf-8') as f:
+                            json.dump(push_records, f, ensure_ascii=False, indent=2)
+        except Exception as e:
+            # 使用标准的logging模块记录错误
+            app_logger.error(f"更新push_records.json文件时发生错误: {str(e)}")
             
         
     except Exception as e:
-        print(f"记录流水线事件时发生错误: {str(e)}")
+        # 使用标准的logging模块记录错误
+        app_logger.error(f"记录流水线事件时发生错误: {str(e)}")

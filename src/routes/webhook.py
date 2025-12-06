@@ -1,6 +1,10 @@
 import json
+import logging
 from flask import request, jsonify
 from logger import webhook_logger, monitor_logger
+
+# 使用标准的logging模块，避免导入问题
+app_logger = logging.getLogger('app_logger')
 from src.services import (
     format_message, 
     record_pipeline_event, 
@@ -20,6 +24,11 @@ def process_webhook(request, route_name, subpath=None):
     """
     处理webhook请求的通用逻辑
     """
+    # 确保app_logger在所有地方都可用
+    import logging
+    global app_logger
+    app_logger = logging.getLogger('app_logger')
+    
     if not request.is_json:
         return jsonify({"error": "Invalid JSON"}), 400
 
@@ -69,13 +78,15 @@ def process_webhook(request, route_name, subpath=None):
                 # 记录详细错误日志
                 error_msg = f"Error processing push event: {str(e)}"
                 monitor_logger.log_event(route_name, request.headers, error_msg)
-                print(error_msg)
+                # 延迟导入app_logger，避免循环导入问题
+                from logger import app_logger
+                app_logger.error(error_msg)
                 return jsonify({"error": error_msg}), 500
         else:
             # 处理流水线事件
             try:
                 # 记录流水线事件
-                record_pipeline_event(payload, subpath, pipeline_records, pipeline_records_lock)
+                record_pipeline_event(payload, subpath, pipeline_records, pipeline_records_lock, push_records, push_records_lock)
                 
                 try:
                     message = format_message(payload, running_builds, running_builds_lock, route_name)
@@ -85,12 +96,16 @@ def process_webhook(request, route_name, subpath=None):
                         target_url = WEBHOOK_CONFIG.get(route_name, DEFAULT_TARGET_URL)
                         if not target_url:
                             raise Exception(f"No target URL configured for route: {route_name}")
-                        print(f"route_name: {route_name}, target_url: {target_url}")
+                        # 延迟导入app_logger，避免循环导入问题
+                        from logger import app_logger
+                        app_logger.info(f"route_name: {route_name}, target_url: {target_url}")
                         send_formatted_message(target_url, message)
                 except Exception as e:
-                    print(f"❌ format_message调用失败: {str(e)}")
+                    # 延迟导入app_logger，避免循环导入问题
+                    from logger import app_logger
+                    app_logger.error(f"❌ format_message调用失败: {str(e)}")
                     import traceback
-                    traceback.print_exc()
+                    app_logger.error(traceback.format_exc())
                 
                 # 返回成功响应
                 return jsonify({"message": f"Pipeline event for {route_name} received and processed"}), 200

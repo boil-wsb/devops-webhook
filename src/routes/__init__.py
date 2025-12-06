@@ -1,7 +1,10 @@
 from flask import request, jsonify, render_template
 from src.routes.webhook import process_webhook
 
+
 def register_routes(app):
+    # 延迟导入app_logger，避免循环导入问题
+    from logger import app_logger
     """
     注册所有路由
     """
@@ -152,13 +155,13 @@ def register_routes(app):
                     try:
                         send_formatted_message(target_url, feishu_card_message)
                     except Exception as e:
-                        print(f"❌ 飞书消息发送失败: {str(e)}")
+                        app_logger.error(f"❌ 飞书消息发送失败: {str(e)}")
                 else:
-                    print(f"⚠️ 未发送飞书消息: target_url={target_url}, presigned_url={presigned_url}")
+                    app_logger.warning(f"⚠️ 未发送飞书消息: target_url={target_url}, presigned_url={presigned_url}")
 
                 
             except Exception as e:
-                print(f"生成预签名URL失败: {str(e)}")
+                app_logger.error(f"生成预签名URL失败: {str(e)}")
                 presigned_url = None
             
             # 返回成功响应，包含预签名URL
@@ -302,9 +305,9 @@ def register_routes(app):
                     with open(project_json_path, 'r', encoding='utf-8') as f:
                         project_data = json.load(f)
                         records_list = list(project_data.values())
-                        print(f"从project.json加载了 {len(records_list)} 条记录")
+                        app_logger.info(f"从project.json加载了 {len(records_list)} 条记录")
                 except Exception as e:
-                    print(f"读取project.json失败: {str(e)}")
+                        app_logger.error(f"读取project.json失败: {str(e)}")
             else:
                 # project.json不存在时使用默认示例记录
                 records_list = [
@@ -318,7 +321,7 @@ def register_routes(app):
                         'subpath': None
                     }
                 ]
-                print("添加了默认示例记录")
+                app_logger.info("添加了默认示例记录")
         
         # 排序：先按record_time降序，无record_time的按project_name升序
         def get_sort_key(x):
@@ -353,7 +356,7 @@ def register_routes(app):
         
         records_list.sort(key=get_sort_key)
         
-        print(f"生成的HTML页面包含 {len(records_list)} 条记录")
+        app_logger.info(f"生成的HTML页面包含 {len(records_list)} 条记录")
         return render_template('base.html', records=records_list)
     
     @app.route('/pipelines/records/json')
