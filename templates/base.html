@@ -99,6 +99,13 @@
             <div class="modal-content">
                 <span class="close" onclick="closePushRecordModal()">&times;</span>
                 <h2>commit-item</h2>
+                <!-- 分支筛选下拉菜单 -->
+                <div class="filter-container" style="margin-bottom: 20px;">
+                    <label for="refFilter" style="color: var(--label-color); font-weight: bold;">选择分支: </label>
+                    <select id="refFilter" onchange="filterRecordsByRef()" class="filter-input">
+                        <option value="all">所有分支</option>
+                    </select>
+                </div>
                 <div id="pushRecordContent">
                     <!-- 动态内容将在此处显示 -->
                 </div>
@@ -199,10 +206,18 @@
         document.getElementById('searchInput').addEventListener('input', filterRecords);
         document.getElementById('projectFilter').addEventListener('change', filterRecords);
         
+        // 全局变量，用于存储原始记录数据
+        let originalPushRecords = [];
+        let currentGitUrl = '';
+        
         // 查看最近push记录
         function viewLatestPushRecord(gitUrl) {
             const modal = document.getElementById('pushRecordModal');
             const content = document.getElementById('pushRecordContent');
+            const refFilter = document.getElementById('refFilter');
+            
+            // 保存当前gitUrl
+            currentGitUrl = gitUrl;
             
             // 显示加载状态
             content.innerHTML = '<div class="loading">加载中...</div>';
@@ -213,102 +228,41 @@
                 .then(response => response.json())
                 .then(data => {
                     if (data.status === 'success' && Array.isArray(data.data)) {
-                        let records = data.data;
+                        // 保存原始记录
+                        originalPushRecords = data.data;
                         // 按时间从晚到早排序
-                        records.sort((a, b) => {
+                        originalPushRecords.sort((a, b) => {
                             const timeA = new Date(a.record_time || 0);
                             const timeB = new Date(b.record_time || 0);
                             return timeB - timeA;
                         });
                         
-                        if (records.length > 0) {
-                            let html = '<div class="push-records-container">';
-                            
-                            // 遍历最近的10条push记录
-                            records.forEach((record, index) => {
-                                // 检查是否有pipeline_iid
-                                let hasPipelineId = false;
-                                let pipelineIds = [];
-                                if (record.commits && record.commits.length > 0) {
-                                    for (const commit of record.commits) {
-                                        if (commit.pipeline_iid) {
-                                            hasPipelineId = true;
-                                            pipelineIds.push(commit.pipeline_iid);
-                                        }
-                                    }
+                        // 收集所有唯一分支
+                        const refs = ['all'];
+                        const refSet = new Set();
+                        
+                        originalPushRecords.forEach(record => {
+                            if (record.ref) {
+                                // 提取分支名称，去除refs/heads/前缀
+                                const branch = record.ref.replace('refs/heads/', '');
+                                if (!refSet.has(branch)) {
+                                    refSet.add(branch);
+                                    refs.push(branch);
                                 }
-                                
-                                html += `
-                                    <div class="push-record-item">
-                                        <div class="push-record-header">
-                                            <h4>${record.ref || 'N/A'}</h4>
-                                            <div class="pipeline-tags">
-                                                ${record.user_name ? `<span class="tag user-tag">${record.user_name}</span>` : ''}
-                                                ${hasPipelineId ? pipelineIds.map(id => `<span class="tag pipeline-tag">流水线ID: ${id}</span>`).join('') : ''}
-                                            </div>
-                                        </div>
-                                        <div class="push-record-detail">
-                                            <div class="commits-list">
-                                `;
-                                
-                                // 处理提交记录
-                                if (record.commits && record.commits.length > 0) {
-                                    // 默认只显示第一条提交记录
-                                    const firstCommit = record.commits[0];
-                                    html += `
-                                        <div class="commit-item" id="commit-${index}-0">
-                                            <div class="commit-message">${firstCommit.message || '无提交信息'}</div>
-                                            <div class="commit-meta">
-                                                <span class="commit-time">${firstCommit.timestamp || 'N/A'}</span>
-                                                ${firstCommit.pipeline_iid ? `<span class="pipeline-id">流水线ID: ${firstCommit.pipeline_iid}</span>` : ''}
-                                                <a href="${firstCommit.url || '#'}" target="_blank" class="commit-url">查看详情</a>
-                                            </div>
-                                        </div>
-                                    `;
-                                    
-                                    // 如果提交记录大于1，添加下拉控制
-                                    if (record.commits.length > 1) {
-                                        html += `
-                                            <div class="more-commits-container">
-                                                <button class="toggle-commits-btn" onclick="toggleCommits(${index})">
-                                                    <span id="toggle-text-${index}">查看更多提交 (${record.commits.length - 1})</span>
-                                                    <span id="toggle-icon-${index}">▼</span>
-                                                </button>
-                                                <div class="more-commits" id="more-commits-${index}" style="display: none;">
-                                        `;
-                                        
-                                        // 显示剩余的提交记录
-                                        for (let i = 1; i < record.commits.length; i++) {
-                                            const commit = record.commits[i];
-                                            html += `
-                                                <div class="commit-item" id="commit-${index}-${i}">
-                                                    <div class="commit-message">${commit.message || '无提交信息'}</div>
-                                                    <div class="commit-meta">
-                                                        <span class="commit-time">${commit.timestamp || 'N/A'}</span>
-                                                        ${commit.pipeline_iid ? `<span class="pipeline-id">流水线ID: ${commit.pipeline_iid}</span>` : ''}
-                                                        <a href="${commit.url || '#'}" target="_blank" class="commit-url">查看详情</a>
-                                                    </div>
-                                                </div>
-                                            `;
-                                        }
-                                        
-                                        html += `
-                                                </div>
-                                            </div>
-                                        `;
-                                    }
-                                } else {
-                                    html += '<div class="no-commits">无提交记录</div>';
-                                }
-                                
-                                html += '</div></div></div>';
-                            });
-                            
-                            html += '</div>';
-                            content.innerHTML = html;
-                        } else {
-                            content.innerHTML = '<div class="no-record">未找到push记录</div>';
-                        }
+                            }
+                        });
+                        
+                        // 更新分支筛选下拉菜单
+                        refFilter.innerHTML = '';
+                        refs.forEach(ref => {
+                            const option = document.createElement('option');
+                            option.value = ref === 'all' ? 'all' : `refs/heads/${ref}`;
+                            option.textContent = ref;
+                            refFilter.appendChild(option);
+                        });
+                        
+                        // 显示所有记录
+                        displayRecordsByRef('all');
                     } else {
                         content.innerHTML = `<div class="no-record">${data.message || '未找到push记录'}</div>`;
                     }
@@ -317,6 +271,118 @@
                     console.error('获取push记录失败:', error);
                     content.innerHTML = '<div class="error">获取push记录失败，请稍后重试</div>';
                 });
+        }
+        
+        // 根据分支筛选记录并显示
+        function filterRecordsByRef() {
+            const refFilter = document.getElementById('refFilter');
+            const selectedRef = refFilter.value;
+            displayRecordsByRef(selectedRef);
+        }
+        
+        // 根据选定的分支显示记录
+        function displayRecordsByRef(selectedRef) {
+            const content = document.getElementById('pushRecordContent');
+            let records = originalPushRecords;
+            
+            // 筛选指定分支的记录
+            if (selectedRef !== 'all') {
+                records = records.filter(record => record.ref === selectedRef);
+            }
+            
+            // 只显示最近的10条记录
+            const displayRecords = records.slice(0, 10);
+            
+            if (displayRecords.length > 0) {
+                let html = '<div class="push-records-container">';
+                
+                // 遍历筛选后的记录
+                displayRecords.forEach((record, index) => {
+                    // 检查是否有pipeline_iid
+                    let hasPipelineId = false;
+                    let pipelineIds = [];
+                    if (record.commits && record.commits.length > 0) {
+                        for (const commit of record.commits) {
+                            if (commit.pipeline_iid) {
+                                hasPipelineId = true;
+                                pipelineIds.push(commit.pipeline_iid);
+                            }
+                        }
+                    }
+                    
+                    // 提取分支名称，去除refs/heads/前缀
+                    const branch = record.ref ? record.ref.replace('refs/heads/', '') : 'N/A';
+                    
+                    html += `
+                        <div class="push-record-item" data-ref="${record.ref || 'N/A'}">
+                            <div class="push-record-header">
+                                <h4>${branch}</h4>
+                                <div class="pipeline-tags">
+                                    ${record.user_name ? `<span class="tag user-tag">${record.user_name}</span>` : ''}
+                                    ${hasPipelineId ? pipelineIds.map(id => `<span class="tag pipeline-tag">流水线ID: ${id}</span>`).join('') : ''}
+                                </div>
+                            </div>
+                            <div class="push-record-detail">
+                                <div class="commits-list">
+                            `;
+                    
+                    // 处理提交记录
+                    if (record.commits && record.commits.length > 0) {
+                        // 默认只显示第一条提交记录
+                        const firstCommit = record.commits[0];
+                        html += `
+                            <div class="commit-item" id="commit-${index}-0">
+                                <div class="commit-message">${firstCommit.message || '无提交信息'}</div>
+                                <div class="commit-meta">
+                                    <span class="commit-time">${firstCommit.timestamp || 'N/A'}</span>
+                                    ${firstCommit.pipeline_iid ? `<span class="pipeline-id">流水线ID: ${firstCommit.pipeline_iid}</span>` : ''}
+                                    <a href="${firstCommit.url || '#'}" target="_blank" class="commit-url">查看详情</a>
+                                </div>
+                            </div>
+                        `;
+                        
+                        // 如果提交记录大于1，添加下拉控制
+                        if (record.commits.length > 1) {
+                            html += `
+                                <div class="more-commits-container">
+                                    <button class="toggle-commits-btn" onclick="toggleCommits(${index})"><span id="toggle-text-${index}">查看更多提交 (${record.commits.length - 1})</span>
+                                        <span id="toggle-icon-${index}">▼</span>
+                                    </button>
+                                    <div class="more-commits" id="more-commits-${index}" style="display: none;">
+                            `;
+                            
+                            // 显示剩余的提交记录
+                            for (let i = 1; i < record.commits.length; i++) {
+                                const commit = record.commits[i];
+                                html += `
+                                    <div class="commit-item" id="commit-${index}-${i}">
+                                        <div class="commit-message">${commit.message || '无提交信息'}</div>
+                                        <div class="commit-meta">
+                                            <span class="commit-time">${commit.timestamp || 'N/A'}</span>
+                                            ${commit.pipeline_iid ? `<span class="pipeline-id">流水线ID: ${commit.pipeline_iid}</span>` : ''}
+                                            <a href="${commit.url || '#'}" target="_blank" class="commit-url">查看详情</a>
+                                        </div>
+                                    </div>
+                                `;
+                            }
+                            
+                            html += `
+                                    </div>
+                                </div>
+                            `;
+                        }
+                    } else {
+                        html += '<div class="no-commits">无提交记录</div>';
+                    }
+                    
+                    html += '</div></div></div>';
+                });
+                
+                html += '</div>';
+                content.innerHTML = html;
+            } else {
+                content.innerHTML = '<div class="no-record">未找到对应分支的push记录</div>';
+            }
         }
         
         // 切换提交记录显示
