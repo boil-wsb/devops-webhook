@@ -159,17 +159,33 @@
             // 阻止默认的链接跳转
             event.preventDefault();
             
-            // 将DEPLOYER复制到剪贴板
-            navigator.clipboard.writeText('DEPLOYER')
-                .then(() => {
-                    // 复制成功后，手动触发链接跳转
-                    window.open(element.href, '_blank');
-                })
-                .catch(err => {
-                    console.error('复制失败:', err);
-                    // 复制失败时，仍然允许链接跳转
-                    window.open(element.href, '_blank');
-                });
+            // 保存链接地址
+            const href = element.href;
+            
+            try {
+                // 检查navigator.clipboard是否可用
+                if (navigator.clipboard && typeof navigator.clipboard.writeText === 'function') {
+                    // 将DEPLOYER复制到剪贴板
+                    navigator.clipboard.writeText('DEPLOYER')
+                        .then(() => {
+                            // 复制成功后，手动触发链接跳转
+                            window.open(href, '_blank');
+                        })
+                        .catch(err => {
+                            console.error('复制失败:', err);
+                            // 复制失败时，仍然允许链接跳转
+                            window.open(href, '_blank');
+                        });
+                } else {
+                    // 剪贴板API不可用时，直接打开链接
+                    console.warn('剪贴板API不可用，直接打开链接');
+                    window.open(href, '_blank');
+                }
+            } catch (err) {
+                // 捕获所有异常，确保链接能正常打开
+                console.error('处理剪贴板操作时发生错误:', err);
+                window.open(href, '_blank');
+            }
         }
         
         // 页面加载时初始化
