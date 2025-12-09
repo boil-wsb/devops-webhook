@@ -37,19 +37,35 @@ def record_push_event(push_record, push_records, push_records_lock):
             # 如果commits不是列表，使用当前时间
             processed_record['push_time'] = datetime.now().isoformat()
         
-        # 3. 保留现有记录中已有的pipeline_iid字段
+        # 3. 处理每个commit的pipeline_iid和source字段
         # 遍历当前push_record中的每个commit
         for i, commit in enumerate(processed_record['commits']):
             commit_url = commit.get('url', '')
             if commit_url:
+                # 获取当前记录的source
+                current_source = processed_record.get('source', '')
+                
+                # 收集所有具有相同commit_url的source
+                sources = [current_source] if current_source else []
+                
                 # 遍历所有现有的push记录，寻找相同的commit url
                 for existing_push_record in push_records:
                     if isinstance(existing_push_record.get('commits'), list):
                         for existing_commit in existing_push_record['commits']:
-                            if existing_commit.get('url') == commit_url and 'pipeline_iid' in existing_commit:
-                                # 找到相同的commit url，保留现有的pipeline_iid字段
-                                processed_record['commits'][i]['pipeline_iid'] = existing_commit['pipeline_iid']
+                            if existing_commit.get('url') == commit_url:
+                                # 保留现有的pipeline_iid字段
+                                if 'pipeline_iid' in existing_commit:
+                                    processed_record['commits'][i]['pipeline_iid'] = existing_commit['pipeline_iid']
+                                
+                                # 收集现有记录的source
+                                existing_source = existing_push_record.get('source', '')
+                                if existing_source and existing_source not in sources:
+                                    sources.append(existing_source)
                                 break
+                
+                # 将source列表添加到当前commit中
+                if sources:
+                    processed_record['commits'][i]['source'] = sources
     
         with push_records_lock:
             # 添加到全局列表
