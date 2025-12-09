@@ -161,31 +161,87 @@
             
             // 保存链接地址
             const href = element.href;
+            const textToCopy = 'DEPLOYER';
             
-            try {
-                // 检查navigator.clipboard是否可用
-                if (navigator.clipboard && typeof navigator.clipboard.writeText === 'function') {
-                    // 将DEPLOYER复制到剪贴板
-                    navigator.clipboard.writeText('DEPLOYER')
-                        .then(() => {
-                            // 复制成功后，手动触发链接跳转
-                            window.open(href, '_blank');
-                        })
-                        .catch(err => {
-                            console.error('复制失败:', err);
-                            // 复制失败时，仍然允许链接跳转
-                            window.open(href, '_blank');
-                        });
-                } else {
-                    // 剪贴板API不可用时，直接打开链接
-                    console.warn('剪贴板API不可用，直接打开链接');
+            // 尝试使用传统的textarea复制方法
+            function fallbackCopyTextToClipboard(text) {
+                const textArea = document.createElement('textarea');
+                textArea.value = text;
+                
+                // 避免滚动到页面底部
+                textArea.style.top = '0';
+                textArea.style.left = '0';
+                textArea.style.position = 'fixed';
+                textArea.style.opacity = '0';
+                
+                document.body.appendChild(textArea);
+                textArea.focus();
+                textArea.select();
+                
+                let successful = false;
+                try {
+                    // 执行复制命令
+                    successful = document.execCommand('copy');
+                    const msg = successful ? '复制成功' : '复制失败';
+                    console.log('Fallback: ' + msg);
+                } catch (err) {
+                    console.error('Fallback: 无法执行复制命令:', err);
+                }
+                
+                document.body.removeChild(textArea);
+                return successful;
+            }
+            
+            // 主复制逻辑
+            function performCopy() {
+                try {
+                    // 检查navigator.clipboard是否可用
+                    if (navigator.clipboard && typeof navigator.clipboard.writeText === 'function') {
+                        // 检查剪贴板权限
+                        navigator.permissions.query({ name: 'clipboard-write' })
+                            .then(permissionStatus => {
+                                // 如果有权限或权限状态为prompt
+                                if (permissionStatus.state === 'granted' || permissionStatus.state === 'prompt') {
+                                    // 执行剪贴板复制
+                                    navigator.clipboard.writeText(textToCopy)
+                                        .then(() => {
+                                            console.log('复制成功');
+                                            window.open(href, '_blank');
+                                        })
+                                        .catch(err => {
+                                            console.error('剪贴板API复制失败，尝试备用方法:', err);
+                                            fallbackCopyTextToClipboard(textToCopy);
+                                            window.open(href, '_blank');
+                                        });
+                                } else {
+                                    // 没有权限，使用备用方法
+                                    console.warn('没有剪贴板权限，使用备用方法');
+                                    fallbackCopyTextToClipboard(textToCopy);
+                                    window.open(href, '_blank');
+                                }
+                            })
+                            .catch(err => {
+                                // 权限查询失败，使用备用方法
+                                console.error('权限查询失败，使用备用方法:', err);
+                                fallbackCopyTextToClipboard(textToCopy);
+                                window.open(href, '_blank');
+                            });
+                    } else {
+                        // 剪贴板API不可用，使用备用方法
+                        console.warn('剪贴板API不可用，使用备用方法');
+                        fallbackCopyTextToClipboard(textToCopy);
+                        window.open(href, '_blank');
+                    }
+                } catch (err) {
+                    // 捕获所有异常，确保链接能正常打开
+                    console.error('处理剪贴板操作时发生错误，使用备用方法:', err);
+                    fallbackCopyTextToClipboard(textToCopy);
                     window.open(href, '_blank');
                 }
-            } catch (err) {
-                // 捕获所有异常，确保链接能正常打开
-                console.error('处理剪贴板操作时发生错误:', err);
-                window.open(href, '_blank');
             }
+            
+            // 执行复制操作
+            performCopy();
         }
         
         // 页面加载时初始化

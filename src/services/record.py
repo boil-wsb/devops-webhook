@@ -109,6 +109,16 @@ def record_pipeline_event(payload, subpath, pipeline_records, pipeline_records_l
         record_time = payload.get('object_attributes', {}).get('created_at', datetime.now().isoformat())
         branch = payload.get('object_attributes', {}).get('ref', '')
         commit_url = payload.get('commit', {}).get('url', '')
+        pipeline_status = payload.get('object_attributes', {}).get('status', '')
+        
+        # 提取builds.stage信息
+        builds = payload.get('builds', [])
+        build_stages = []
+        for build in builds:
+            if isinstance(build, dict):
+                stage = build.get('stage', '')
+                if stage:
+                    build_stages.append(stage)
         
         # 如果缺少必要信息，直接返回
         if not namespace or not project_name:
@@ -187,6 +197,19 @@ def record_pipeline_event(payload, subpath, pipeline_records, pipeline_records_l
                             if commit.get('url') == commit_url:
                                 # 插入pipeline_iid
                                 commit['pipeline_iid'] = pipeline_iid
+                                
+                                # 记录build stages
+                                if build_stages:
+                                    # 如果已经有stages字段，添加新的stages；否则创建新的列表
+                                    if 'stages' not in commit:
+                                        commit['stages'] = []
+                                    # 将当前build_stages添加到stages列表中
+                                    commit['stages'].extend(build_stages)
+                                
+                                # 记录流水线状态
+                                if pipeline_status:
+                                    commit['pipeline_status'] = pipeline_status
+                                
                                 updated = True
                 
                 # 如果有更新，写入文件
