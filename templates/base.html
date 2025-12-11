@@ -83,7 +83,7 @@
                             <span class="field-label">Git地址:</span>
                             <span class="field-value">{{ record.git_url or 'N/A' }}</span>
                         </div>
-                        {% if record.subpath == 'PD3' %}
+                        {% if record.subpath == 'PD3' or record.subpath == 'edge' %}
                             <div class="record-field">
                                 <span class="field-label">应用变量:</span>
                                 <span class="field-value">DEPLOYER == test</span>
@@ -97,7 +97,7 @@
                     </div>
                     <div class="card-actions">
                         <a href="{{ record.git_url or '#' }}" target="_blank" class="card-btn git-btn">进入项目</a>
-                        <a href="{{ record.pipeline_path or '#' }}" target="_blank" class="card-btn build-btn" onclick="copyDeployerToClipboard(event, this)">点我进入构建入口 <span title="点击复制应用变量并跳转构建入口" style="margin-left: 8px; background-color: #93c5fd; color: #0f172a; width: 20px; height: 20px; border-radius: 50%; display: inline-flex; align-items: center; justify-content: center; font-weight: bold; font-size: 14px;">!</span></a>
+                        <a href="{{ record.pipeline_path or '#' }}" target="_blank" class="card-btn build-btn" onclick="copyDeployerToClipboard(event, this)" data-subpath="{{ record.subpath or '' }}">点我进入构建入口 <span title="点击复制应用变量并跳转构建入口" style="margin-left: 8px; background-color: #93c5fd; color: #0f172a; width: 20px; height: 20px; border-radius: 50%; display: inline-flex; align-items: center; justify-content: center; font-weight: bold; font-size: 14px;">!</span></a>
                         <button class="card-btn info-btn" onclick="viewLatestPushRecord('{{ record.git_url }}')">查看最近push记录</button>
                     </div>
                 </div>
@@ -154,14 +154,29 @@
             localStorage.setItem('layout', cols);
         }
         
-        // 复制DEPLOYER到剪贴板的函数
+        // 复制应用变量到剪贴板的函数
         function copyDeployerToClipboard(event, element) {
             // 阻止默认的链接跳转
             event.preventDefault();
             
             // 保存链接地址
             const href = element.href;
-            const textToCopy = 'DEPLOYER';
+            
+            // 根据subpath决定要复制的文本
+            const subpath = element.dataset.subpath || '';
+            let textToCopy = '';
+            
+            if (subpath === 'PD3' || subpath === 'edge') {
+                textToCopy = 'DEPLOYER';
+            } else if (subpath === 'PD4') {
+                textToCopy = 'MANUAL_PAR';
+            }
+            
+            // 如果没有匹配的subpath，不执行复制操作，直接打开链接
+            if (!textToCopy) {
+                window.open(href, '_blank');
+                return;
+            }
             
             // 尝试使用传统的textarea复制方法
             function fallbackCopyTextToClipboard(text) {
