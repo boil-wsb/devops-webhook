@@ -71,6 +71,14 @@ def record_push_event(push_record, push_records, push_records_lock):
             # 添加到全局列表
             push_records.append(processed_record)
             
+            # 限制内存中最多存储5000条记录
+            max_records = 5000
+            if len(push_records) > max_records:
+                # 保留最新的1000条记录，删除最旧的记录
+                # 先按push_time从晚到早排序，然后截断列表
+                push_records.sort(key=lambda x: x.get('push_time', ''), reverse=True)
+                del push_records[max_records:]
+            
             # 写入文件
             file_path = 'push_records.json'
             with open(file_path, 'w', encoding='utf-8') as f:
@@ -111,14 +119,21 @@ def record_pipeline_event(payload, subpath, pipeline_records, pipeline_records_l
         commit_url = payload.get('commit', {}).get('url', '')
         pipeline_status = payload.get('object_attributes', {}).get('status', '')
         
-        # 提取builds.stage信息
+        # 提取builds信息，包括stage、name和状态
         builds = payload.get('builds', [])
         build_stages = []
         for build in builds:
             if isinstance(build, dict):
                 stage = build.get('stage', '')
+                name = build.get('name', '')
+                status = build.get('status', '')
                 if stage:
-                    build_stages.append(stage)
+                    # 记录stage、name和status的组合
+                    build_stages.append({
+                        'stage': stage,
+                        'name': name,
+                        'status': status
+                    })
         
         # 如果缺少必要信息，直接返回
         if not namespace or not project_name:
