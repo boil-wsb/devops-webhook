@@ -89,9 +89,35 @@ def process_webhook(request, route_name, subpath=None):
                 record_pipeline_event(payload, subpath, pipeline_records, pipeline_records_lock, push_records, push_records_lock)
                 
                 try:
-                    message = format_message(payload, running_builds, running_builds_lock, route_name)
+                    message = format_message(payload, running_builds, running_builds_lock, route_name, push_records, push_records_lock)
                     
                     if message:
+                        # 检查是否为失败的pipeline记录
+                        status = payload['object_attributes'].get('status', '')
+                        if status == 'failed':
+                            # 打印对应的push_records记录
+                            commit_url = payload.get('commit', {}).get('url', '')
+                            if commit_url:
+                                # 在push_records中查找匹配的记录
+                                matching_records = []
+                                with push_records_lock:
+                                    for push_record in push_records:
+                                        if isinstance(push_record.get('commits'), list):
+                                            for commit in push_record['commits']:
+                                                if commit.get('url') == commit_url:
+                                                    matching_records.append(push_record)
+                                                    break
+                                
+                                # 打印匹配的push_records记录
+                                if matching_records:
+                                    print(f"\n=== 匹配的push_records记录 ===")
+                                    print(json.dumps(matching_records, ensure_ascii=False, indent=2))
+                                    print("==============================\n")
+                                else:
+                                    print(f"\n=== 未找到匹配的push_records记录 ===")
+                                    print(f"Commit URL: {commit_url}")
+                                    print("==============================\n")
+                        
                         # 根据路由名称获取对应的目标URL
                         target_url = WEBHOOK_CONFIG.get(route_name, DEFAULT_TARGET_URL)
                         if not target_url:

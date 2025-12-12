@@ -17,7 +17,7 @@ def send_formatted_message(target_url, message):
     return True
 
 
-def format_message(payload, running_builds=None, running_builds_lock=None, route_name=None):
+def format_message(payload, running_builds=None, running_builds_lock=None, route_name=None, push_records=None, push_records_lock=None):
     """
     格式化消息
     """
@@ -38,6 +38,10 @@ def format_message(payload, running_builds=None, running_builds_lock=None, route
     # 安全获取builds_name，避免列表索引超出范围
     builds_name = payload['builds'][0]['name'] if payload.get('builds') and len(payload['builds']) > 0 else "unknown"
     source = payload['object_attributes']['source']
+    
+    # 获取commit_url用于查找push_records
+    commit_url = payload.get('commit', {}).get('url', '')
+    app_logger.info(f"Current commit_url: {commit_url}")
 
     if 'parent_pipeline' == source:
         return None
@@ -127,25 +131,104 @@ def format_message(payload, running_builds=None, running_builds_lock=None, route
             end_time = convert_utc_to_utc8(payload['object_attributes']['finished_at'])
             duration = calculate_interval(start_time, end_time)
 
+        # 基础元素列表
+        elements = [
+            {
+                'icon': 'member_outlined',
+                'content': f"***提交人员***：{user_name}",
+            },
+            {
+                'icon': 'time_outlined',
+                'content': f"***开始时间***：{start_time}",
+            },
+            {
+                'icon': 'burnlife-notime_outlined',
+                'content': f"***持续时间***：{duration}",
+            },
+            {
+                'icon': 'mindnote_outlined',
+                'content': f"***分      支***：{branch}",
+            },
+        ]
+
+        # 如果pipeline失败，尝试从push_records中查找deploy_ip并替换持续时间项
+        if status == 'failed' and commit_url:
+            try:
+                deploy_ip = ''
+                
+                # 从push_records中查找对应的deploy_ip，优化查找效率
+                if push_records and push_records_lock:
+                    app_logger.info(f"Searching deploy_ip from push_records for commit_url: {commit_url}")
+                    with push_records_lock:
+                        app_logger.info(f"Current push_records count: {len(push_records)}")
+                        found_deploy_ip = False
+                        
+                        # 遍历push_records，找到匹配的commit_url
+                        for push_record in push_records:
+                            commits = push_record.get('commits', [])
+                            if not isinstance(commits, list):
+                                continue
+                            
+                            # 查找匹配commit_url的commit
+                            matching_commit = next((c for c in commits if c.get('url') == commit_url), None)
+                            if matching_commit:
+                                app_logger.info(f"Found matching commit in push_records")
+                                
+                                # 从commit的stages中查找包含deploy_ip的stage
+                                stages = matching_commit.get('stages', [])
+                                deploy_stage = next((s for s in stages if isinstance(s, dict) and s.get('deploy_ip')), None)
+                                if deploy_stage:
+                                    deploy_ip = deploy_stage.get('deploy_ip', '')
+                                    if deploy_ip:
+                                        app_logger.info(f"Found deploy_ip from push_records: {deploy_ip}")
+                                        found_deploy_ip = True
+                                        break
+                            if found_deploy_ip:
+                                break
+                
+                # 如果push_records中没有找到，尝试从payload中查找
+                if not deploy_ip:
+                    app_logger.info(f"No deploy_ip found in push_records, trying payload")
+                    # 从payload的builds中查找deploy_ip
+                    builds = payload.get('builds', [])
+                    for build in builds:
+                        if isinstance(build, dict) and build.get('stage', '').lower() == 'deploy':
+                            deploy_ip = build.get('deploy_ip', '')
+                            if deploy_ip:
+                                app_logger.info(f"Found deploy_ip from payload: {deploy_ip}")
+                                break
+                    
+                    # 如果没有找到，尝试从variables中查找
+                    if not deploy_ip:
+                        variables = payload.get('object_attributes', {}).get('variables', [])
+                        for var in variables:
+                            if isinstance(var, dict):
+                                key = var.get('key', '')
+                                value = var.get('value', '')
+                                if key == 'DEPLOY_REMOTE_HOST' and value:
+                                    deploy_ip = value
+                                    app_logger.info(f"Found deploy_ip from variables: {deploy_ip}")
+                                    break
+                
+                # 如果找到deploy_ip，替换元素列表中的持续时间项
+                if deploy_ip:
+                    # 查找持续时间项的索引
+                    for i, element in enumerate(elements):
+                        if element['icon'] == 'burnlife-notime_outlined':
+                            # 替换持续时间项为部署IP
+                            elements[i] = {
+                                'icon': 'location_outlined',
+                                'content': f"***部署机器***：{deploy_ip}",
+                            }
+                            app_logger.info(f"Replaced duration with deploy_ip: {deploy_ip}")
+                            break
+            except Exception as e:
+                app_logger.error(f"Failed to replace duration with deploy_ip: {str(e)}")
+                import traceback
+                app_logger.error(traceback.format_exc())
+
         message_config = {
-            'elements': [
-                {
-                    'icon': 'member_outlined',
-                    'content': f"***提交人员***：{user_name}",
-                },
-                {
-                    'icon': 'time_outlined',
-                    'content': f"***开始时间***：{start_time}",
-                },
-                {
-                    'icon': 'burnlife-notime_outlined',
-                    'content': f"***持续时间***：{duration}",
-                },
-                {
-                    'icon': 'mindnote_outlined',
-                    'content': f"***分      支***：{branch}",
-                },
-            ],
+            'elements': elements,
             'header': {
                 'template': f"{'green' if status == 'success' else 'red'}",
                 'icon_token': f"{'succeed_filled' if status == 'success' else 'error_filled'}"
@@ -182,24 +265,72 @@ def format_message(payload, running_builds=None, running_builds_lock=None, route
         }
     ]
 
-    # 如果状态是failed，添加失败的builds信息到text_tag_list
+    # 如果状态是failed，替换text_tag_list最后一项为失败的builds信息
     if 'failed' == status:
         failed_stages = []
-        # 遍历builds数组，找出状态为failed的作业
-        for build in payload.get('builds', []):
-            if build.get('status') == 'failed':
-                failed_stages.append(build.get('name', 'Unknown'))
         
-        # 如果有失败的builds，添加到text_tag_list中
-        if failed_stages:
-            text_tag_list.append({
-                "tag": "text_tag",
-                "text": {
-                    "tag": "plain_text",
-                    "content": f"str({', '.join(failed_stages)})"
-                },
-                "color": "red"
-            })
+        # 1. 优先从push_records中获取failed_stages
+        if push_records and push_records_lock and commit_url:
+            app_logger.info(f"Getting failed_stages from push_records for commit_url: {commit_url}")
+            with push_records_lock:
+                # 查找匹配的commit
+                matching_commit = None
+                for push_record in push_records:
+                    commits = push_record.get('commits', [])
+                    if isinstance(commits, list):
+                        matching_commit = next((c for c in commits if c.get('url') == commit_url), None)
+                        if matching_commit:
+                            break
+                
+                if matching_commit:
+                    app_logger.info(f"Found matching commit in push_records")
+                    stages = matching_commit.get('stages', [])
+                    # 从stages中获取status为failed的stage
+                    for stage in stages:
+                        if isinstance(stage, dict):
+                            stage_status = stage.get('status', '')
+                            if stage_status == 'failed':
+                                stage_name = stage.get('name', stage.get('stage', 'Unknown'))
+                                failed_stages.append(stage_name)
+                    
+                    app_logger.info(f"Failed stages from push_records: {failed_stages}")
+        
+        # 2. 如果push_records中没有找到，从payload.get('builds', [])中获取
+        if not failed_stages:
+            app_logger.info("No failed_stages from push_records, getting from payload")
+            builds = payload.get('builds', [])
+            
+            for build in builds:
+                if isinstance(build, dict):
+                    build_status = build.get('status', '')
+                    build_name = build.get('name', 'Unknown')
+                    app_logger.info(f"Checking build: {build_name}, status: {build_status}")
+                    if build_status == 'failed':
+                        failed_stages.append(build_name)
+            
+            app_logger.info(f"Failed stages from payload: {failed_stages}")
+        
+        # 3. 如果都没有找到，使用默认值"deploy"
+        if not failed_stages:
+            failed_stages = ["deploy"]
+            app_logger.info("Using default failed stage: deploy")
+        
+        # 添加失败的builds信息到text_tag_list中
+        failed_stages_text = ', '.join(failed_stages)
+        
+        # 移除最后一项
+        if text_tag_list:
+            removed_item = text_tag_list.pop()
+        
+        # 添加失败的stage信息作为新的最后一项
+        text_tag_list.append({
+            "tag": "text_tag",
+            "text": {
+                "tag": "plain_text",
+                "content": f"failed job：{failed_stages_text}"
+            },
+            "color": "red"
+        })
 
     message = {
         "msg_type": "interactive",

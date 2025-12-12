@@ -119,7 +119,33 @@ def record_pipeline_event(payload, subpath, pipeline_records, pipeline_records_l
         commit_url = payload.get('commit', {}).get('url', '')
         pipeline_status = payload.get('object_attributes', {}).get('status', '')
         
-        # 提取builds信息，包括stage、name和状态
+        # 提取variables中的IP变量，使用正则表达式匹配IP相关变量
+        variables = payload.get('object_attributes', {}).get('variables', [])
+        deploy_ip = ''
+        
+        # IP地址正则表达式
+        ip_pattern = re.compile(r'^((25[0-5]|2[0-4]\d|[01]?\d\d?)\.){3}(25[0-5]|2[0-4]\d|[01]?\d\d?)$')
+        
+        # IP相关变量名正则表达式
+        ip_var_pattern = re.compile(r'(IP|ip|HOST|host|REMOTE|remote)', re.IGNORECASE)
+        
+        for var in variables:
+            if isinstance(var, dict):
+                key = var.get('key', '')
+                value = var.get('value', '')
+                
+                # 首先检查变量名是否与IP相关
+                if ip_var_pattern.search(key) and value:
+                    # 然后检查值是否为有效的IP地址
+                    if ip_pattern.match(value):
+                        deploy_ip = value
+                        break
+                    # 如果不是有效的IP地址，但变量名包含DEPLOY_REMOTE_HOST，也作为备选
+                    elif key == 'DEPLOY_REMOTE_HOST':
+                        deploy_ip = value
+                        break
+        
+        # 提取builds信息，包括stage、name、状态和deploy_ip
         builds = payload.get('builds', [])
         build_stages = []
         for build in builds:
@@ -128,16 +154,26 @@ def record_pipeline_event(payload, subpath, pipeline_records, pipeline_records_l
                 name = build.get('name', '')
                 status = build.get('status', '')
                 if stage:
-                    # 记录stage、name和status的组合
-                    build_stages.append({
+                    # 创建job记录
+                    job_record = {
                         'stage': stage,
                         'name': name,
                         'status': status
-                    })
+                    }
+                    
+                    # 将deploy_ip添加到对应的job记录中
+                    # 特别是deploy阶段的job，应该包含deploy_ip
+                    if deploy_ip and stage.lower() == 'deploy':
+                        job_record['deploy_ip'] = deploy_ip
+                    
+                    build_stages.append(job_record)
         
         # 如果缺少必要信息，直接返回
         if not namespace or not project_name:
             return
+        
+        # 注意：子pipeline（source为parent_pipeline）也需要记录，只要有commit_url
+        # 这里不检查pipeline的source，只要有commit_url就处理
         
         # 组装流水线路径: 保留 detail_url 中 /-/ 后的内容
         detail_url = payload.get('object_attributes', {}).get('url', '')
@@ -213,13 +249,33 @@ def record_pipeline_event(payload, subpath, pipeline_records, pipeline_records_l
                                 # 插入pipeline_iid
                                 commit['pipeline_iid'] = pipeline_iid
                                 
-                                # 记录build stages
+                                # 记录build stages，根据stage和name更新status，避免重复
                                 if build_stages:
-                                    # 如果已经有stages字段，添加新的stages；否则创建新的列表
+                                    # 确保stages字段存在且是列表
                                     if 'stages' not in commit:
                                         commit['stages'] = []
-                                    # 将当前build_stages添加到stages列表中
-                                    commit['stages'].extend(build_stages)
+                                    
+                                    # 遍历当前build_stages，更新或添加stage记录
+                                    for new_stage in build_stages:
+                                        stage_name = new_stage.get('stage', '')
+                                        job_name = new_stage.get('name', '')
+                                        stage_status = new_stage.get('status', '')
+                                        
+                                        if stage_name:
+                                            # 查找是否已存在相同stage和name的记录
+                                            found = False
+                                            for existing_stage in commit['stages']:
+                                                if existing_stage.get('stage') == stage_name and existing_stage.get('name') == job_name:
+                                                    # 更新现有记录的status
+                                                    existing_stage['status'] = stage_status
+                                                    found = True
+                                                    updated = True
+                                                    break
+                                            
+                                            if not found:
+                                                # 添加新的stage记录
+                                                commit['stages'].append(new_stage)
+                                                updated = True
                                 
                                 # 记录流水线状态
                                 if pipeline_status:
