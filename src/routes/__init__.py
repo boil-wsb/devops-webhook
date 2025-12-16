@@ -434,4 +434,97 @@ def register_routes(app):
                 'status': 'error',
                 'message': str(e)
             }), 500
+    
+    @app.route('/api/cd-records', methods=['GET'])
+    def cd_records_api():
+        """
+        获取CD记录API，返回存在pipeline_iid的记录
+        """
+        from src.services import push_records, push_records_lock
+        import json
+        import os
+        import logging
+        
+        try:
+            # 先从内存中获取所有push记录
+            all_records = []
+            with push_records_lock:
+                all_records = push_records.copy()
+            
+            # 如果内存中没有，从文件中读取
+            if not all_records:
+                if os.path.exists('push_records.json'):
+                    with open('push_records.json', 'r', encoding='utf-8') as f:
+                        all_records = json.load(f)
+            
+            # 筛选出存在pipeline_iid的CD记录
+            cd_records = []
+            for record in all_records:
+                commits = record.get('commits', [])
+                if isinstance(commits, list):
+                    for commit in commits:
+                        if commit.get('pipeline_iid'):
+                            # 收集部署IP
+                            deploy_ips = []
+                            stages = commit.get('stages', [])
+                            for stage in stages:
+                                if isinstance(stage, dict):
+                                    ip = stage.get('deploy_ip')
+                                    if ip:
+                                        if isinstance(ip, list):
+                                            deploy_ips.extend(ip)
+                                        else:
+                                            deploy_ips.append(ip)
+                            
+                            # 去重
+                            deploy_ips = list(set(deploy_ips))
+                            
+                            # 只添加存在pipeline_iid且deploy_ips不为空的记录
+                            if commit.get('pipeline_iid') and deploy_ips:
+                                # 处理ref，去除refs/heads/前缀
+                                original_ref = record.get('ref', '')
+                                processed_ref = original_ref
+                                if processed_ref.startswith('refs/heads/'):
+                                    processed_ref = processed_ref.replace('refs/heads/', '')
+                                elif processed_ref.startswith('refs/tags/'):
+                                    processed_ref = processed_ref.replace('refs/tags/', '')
+                                
+                                # 创建CD记录
+                                cd_record = {
+                                    'project_name': record.get('project_name', ''),
+                                    'ref': processed_ref,
+                                    'user_name': record.get('user_name', ''),
+                                    'pipeline_iid': commit.get('pipeline_iid'),
+                                    'push_time': commit.get('timestamp', ''),
+                                    'pipeline_status': commit.get('pipeline_status', ''),
+                                    'deploy_ips': deploy_ips,
+                                    'message': commit.get('message', '')
+                                }
+                                cd_records.append(cd_record)
+            
+            # 确保返回的records是数组
+            return jsonify({
+                'status': 'success',
+                'records': cd_records,
+                'count': len(cd_records)
+            }), 200
+        except Exception as e:
+            # 记录详细错误日志
+            logging.error(f"获取CD记录失败: {str(e)}")
+            import traceback
+            logging.error(traceback.format_exc())
+            
+            return jsonify({
+                'status': 'error',
+                'message': str(e),
+                'records': [],
+                'count': 0
+            }), 200
+    
+    @app.route('/cd-records')
+    def cd_records_view():
+        """
+        CD记录管理页面
+        """
+        return render_template('cd_records.html')
 

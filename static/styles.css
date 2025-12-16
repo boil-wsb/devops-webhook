@@ -137,15 +137,20 @@ h2 {
 .records-count {
     background-color: var(--btn-bg);
     color: white;
-    padding: 8px 16px;
+    padding: 10px 20px;
     border-radius: 8px;
-    margin-bottom: 16px;
+    margin-bottom: 0;
+    margin: 0;
     display: inline-flex;
     align-items: center;
+    justify-content: center;
     font-weight: 500;
     font-size: 14px;
     box-shadow: var(--shadow-card);
     transition: all var(--transition-normal);
+    height: 40px;
+    line-height: 1;
+    border: none;
 }
 
 .records-count:hover {
@@ -403,12 +408,6 @@ h2 {
     color: white;
 }
 
-/* 流水线标签样式 */
-.pipeline-tag {
-    background-color: var(--tag-pipeline);
-    color: white;
-}
-
 /* 用户标签样式 */
 .user-tag {
     background-color: var(--tag-user);
@@ -433,6 +432,7 @@ h2 {
     display: flex;
     align-items: center;
     gap: 16px;
+    height: 40px;
 }
 
 .control-right {
@@ -551,9 +551,15 @@ h2 {
     cursor: pointer;
     font-size: 14px;
     font-weight: 500;
-    margin-bottom: 16px;
+    margin-bottom: 0;
     box-shadow: var(--shadow-card);
     transition: all var(--transition-normal);
+    height: 40px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    margin: 0;
+    line-height: 1;
 }
 
 .refresh-btn:hover {
@@ -669,29 +675,6 @@ h2 {
     font-size: 14px;
 }
 
-/* 模态弹窗内容样式 */
-.push-record-detail {
-    margin-top: 20px;
-}
-
-.detail-field {
-    margin-bottom: 12px;
-    display: flex;
-    align-items: center;
-}
-
-.detail-label {
-    font-weight: bold;
-    margin-right: 10px;
-    width: 120px;
-    color: var(--label-color);
-}
-
-.detail-value {
-    flex: 1;
-    word-break: break-all;
-}
-
 /* 提交记录样式 */
 .commits-list {
     margin-top: 15px;
@@ -780,16 +763,6 @@ h2 {
 /* 深色模式下的标签样式 */
 [data-theme="dark"] .branch-tag {
     background-color: #389e0d;
-}
-
-/* 按钮样式 */
-.info-btn {
-    background-color: var(--btn-bg);
-    color: white;
-}
-
-.info-btn:hover {
-    background-color: var(--btn-hover);
 }
 
 /* push记录容器样式 */
@@ -933,4 +906,421 @@ h2 {
 /* 提交记录项目 */
 .commit-item {
     margin-bottom: 10px;
+}
+
+/* CD记录管理页面样式 */
+.cd-records-container {
+    max-width: 1400px;
+    margin: 0 auto;
+    background-color: var(--card-bg);
+    border-radius: 12px;
+    box-shadow: var(--shadow-card);
+    overflow: hidden;
+}
+
+/* 页面标题 */
+.cd-records-container h1 {
+    background: linear-gradient(135deg, var(--btn-bg), var(--btn-hover));
+    color: white;
+    margin: 0;
+    padding: 24px 32px;
+    font-size: 24px;
+    font-weight: 600;
+    text-align: left;
+}
+
+/* 筛选区域 */
+.filter-section {
+    padding: 24px 32px;
+    border-bottom: 1px solid var(--border-color);
+    background-color: var(--card-bg);
+}
+
+.filter-section h2 {
+    margin: 0 0 16px 0;
+    font-size: 18px;
+    font-weight: 600;
+    color: var(--text-color);
+}
+
+/* 筛选行 */
+.filter-row {
+    display: flex;
+    gap: 16px;
+    flex-wrap: wrap;
+    align-items: center;
+}
+
+/* 筛选项 */
+.filter-item {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.filter-item label {
+    font-weight: 500;
+    color: var(--label-color);
+    font-size: 14px;
+    white-space: nowrap;
+}
+
+/* 筛选输入框和下拉选择框 */
+.filter-item input,
+.filter-item select {
+    padding: 8px 12px;
+    border: 1px solid var(--border-color);
+    border-radius: 8px;
+    font-size: 14px;
+    min-width: 180px;
+    background-color: var(--card-bg);
+    color: var(--text-color);
+    transition: all var(--transition-normal);
+}
+
+.filter-item input:focus,
+.filter-item select:focus {
+    outline: none;
+    border-color: var(--btn-bg);
+    box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.1);
+}
+
+/* 记录区域 */
+.records-section {
+    padding: 24px 32px;
+}
+
+/* 总记录数 */
+.total-records {
+    text-align: center;
+    margin-bottom: 16px;
+    color: var(--label-color);
+    font-size: 14px;
+    font-weight: 500;
+}
+
+/* 记录表格 */
+.records-table {
+    width: 100%;
+    border-collapse: collapse;
+    background: var(--card-bg);
+    border-radius: 8px;
+    overflow: hidden;
+    box-shadow: var(--shadow-card);
+    font-size: 14px;
+    table-layout: fixed;
+}
+
+/* 表格列宽 */
+.records-table th:nth-child(1), /* 项目名称 */
+.records-table td:nth-child(1) {
+    width: 180px;
+    word-break: break-word;
+}
+
+.records-table th:nth-child(7), /* 部署IP */
+.records-table td:nth-child(7) {
+    width: 108px; /* 180px * 60% */
+    word-break: break-word;
+}
+
+.records-table th:nth-child(2), /* 分支 */
+.records-table td:nth-child(2) {
+    width: 150px;
+    word-break: break-word;
+}
+
+.records-table th:nth-child(3), /* 提交人员 */
+.records-table td:nth-child(3) {
+    width: 120px;
+}
+
+.records-table th:nth-child(4), /* 流水线ID */
+.records-table td:nth-child(4) {
+    width: 100px;
+}
+
+.records-table th:nth-child(5), /* 推送时间 */
+.records-table td:nth-child(5) {
+    width: 160px;
+}
+
+.records-table th:nth-child(6), /* 状态 */
+.records-table td:nth-child(6) {
+    width: 100px;
+}
+
+.records-table th:nth-child(8), /* 提交信息 */
+.records-table td:nth-child(8) {
+    width: auto;
+    word-break: break-word;
+    position: relative;
+    cursor: help;
+    line-height: 1.4;
+    vertical-align: top;
+}
+
+/* 提交信息内容样式 */
+.message-content {
+    max-height: 72px; /* 约3行高度 */
+    overflow: hidden;
+    text-overflow: ellipsis;
+    display: -webkit-box;
+    -webkit-line-clamp: 3;
+    -webkit-box-orient: vertical;
+    position: relative;
+    padding: 0;
+    margin: 0;
+}
+
+/* 自定义tooltip样式 */
+.message-content {
+    position: relative;
+}
+
+.message-content:hover::after {
+    content: attr(data-tooltip);
+    position: absolute;
+    top: -10px;
+    right: 10px;
+    transform: translateY(-100%);
+    background-color: var(--text-color);
+    color: var(--bg-color);
+    padding: 10px 12px;
+    border-radius: 8px;
+    box-shadow: var(--shadow-card-hover);
+    font-size: 14px;
+    line-height: 1.4;
+    white-space: pre-wrap;
+    max-width: 400px;
+    z-index: 100;
+    pointer-events: none;
+    opacity: 1;
+    transition: opacity 0.2s ease;
+}
+
+/* 深色模式下的tooltip样式 */
+[data-theme="dark"] .message-content:hover::after {
+    background-color: var(--text-color);
+    color: var(--bg-color);
+}
+
+/* 页面跳转按钮 */
+.page-nav-btn {
+    background-color: var(--btn-bg);
+    color: white;
+    border: none;
+    padding: 10px 20px;
+    border-radius: 8px;
+    cursor: pointer;
+    font-size: 14px;
+    font-weight: 500;
+    transition: all var(--transition-normal);
+    box-shadow: var(--shadow-card);
+    text-decoration: none;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    height: 40px;
+    margin: 0;
+    line-height: 1;
+}
+
+.page-nav-btn:hover {
+    background-color: var(--btn-hover);
+    box-shadow: var(--shadow-card-hover);
+    transform: translateY(-1px);
+}
+
+.page-nav-btn:active {
+    transform: translateY(0);
+}
+
+/* 表格表头和单元格 */
+.records-table th,
+.records-table td {
+    padding: 12px 16px;
+    text-align: left;
+    border-bottom: 1px solid var(--border-color);
+}
+
+/* 表格表头 */
+.records-table th {
+    background: linear-gradient(to right, var(--note-bg), var(--default-bg));
+    font-weight: 600;
+    color: var(--text-color);
+    cursor: pointer;
+    position: relative;
+    text-transform: uppercase;
+    font-size: 12px;
+    letter-spacing: 0.5px;
+    white-space: nowrap;
+    transition: all var(--transition-normal);
+}
+
+.records-table th:hover {
+    background: linear-gradient(to right, var(--border-color), var(--default-bg));
+}
+
+/* 表格行 */
+.records-table tr {
+    transition: all var(--transition-normal);
+}
+
+.records-table tr:hover {
+    background: var(--note-bg);
+    transform: translateY(-1px);
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.05);
+}
+
+.records-table tr:last-child td {
+    border-bottom: none;
+}
+
+/* 排序指示器 */
+.sort-indicator {
+    margin-left: 6px;
+    font-size: 12px;
+    color: var(--label-color);
+    opacity: 0.6;
+}
+
+/* 状态标签 */
+.status-success {
+    background-color: rgba(16, 185, 129, 0.1);
+    color: var(--tag-pipeline);
+    font-weight: 500;
+    padding: 4px 10px;
+    border-radius: 12px;
+    font-size: 12px;
+}
+
+.status-failed {
+    background-color: rgba(239, 68, 68, 0.1);
+    color: #ef4444;
+    font-weight: 500;
+    padding: 4px 10px;
+    border-radius: 12px;
+    font-size: 12px;
+}
+
+.status-pending {
+    background-color: rgba(245, 158, 11, 0.1);
+    color: var(--tag-branch);
+    font-weight: 500;
+    padding: 4px 10px;
+    border-radius: 12px;
+    font-size: 12px;
+}
+
+/* 部署IP列表 */
+.deploy-ip-list {
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+}
+
+.deploy-ip {
+    background: var(--default-bg);
+    color: var(--btn-bg);
+    padding: 4px 10px;
+    border-radius: 16px;
+    font-size: 12px;
+    font-weight: 500;
+    box-shadow: var(--shadow-card);
+}
+
+/* 分页 */
+.pagination {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    margin-top: 24px;
+    gap: 8px;
+}
+
+.pagination button {
+    padding: 8px 14px;
+    border: 1px solid var(--border-color);
+    background: var(--card-bg);
+    color: var(--text-color);
+    border-radius: 8px;
+    cursor: pointer;
+    font-size: 14px;
+    font-weight: 500;
+    transition: all var(--transition-normal);
+}
+
+.pagination button:hover:not(:disabled) {
+    background: var(--note-bg);
+    border-color: var(--btn-bg);
+}
+
+.pagination button.active {
+    background: var(--btn-bg);
+    color: white;
+    border-color: var(--btn-bg);
+    box-shadow: var(--shadow-card);
+}
+
+.pagination button:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+
+/* 深色模式适配 */
+[data-theme="dark"] .records-table {
+    background: var(--card-bg);
+    color: var(--text-color);
+}
+
+[data-theme="dark"] .records-table th {
+    background: linear-gradient(to right, var(--card-bg), var(--default-bg));
+}
+
+[data-theme="dark"] .records-table tr:hover {
+    background: var(--default-bg);
+}
+
+[data-theme="dark"] .status-success {
+    background-color: rgba(16, 185, 129, 0.2);
+}
+
+[data-theme="dark"] .status-failed {
+    background-color: rgba(239, 68, 68, 0.2);
+}
+
+[data-theme="dark"] .status-pending {
+    background-color: rgba(245, 158, 11, 0.2);
+}
+
+[data-theme="dark"] .deploy-ip {
+    background: rgba(59, 130, 246, 0.1);
+}
+
+/* 响应式设计 */
+@media (max-width: 768px) {
+    .filter-row {
+        flex-direction: column;
+        align-items: stretch;
+    }
+    
+    .filter-item {
+        flex-direction: column;
+        align-items: stretch;
+    }
+    
+    .filter-item label {
+        margin-bottom: 4px;
+    }
+    
+    .records-table {
+        font-size: 12px;
+    }
+    
+    .records-table th,
+    .records-table td {
+        padding: 8px 12px;
+    }
 }

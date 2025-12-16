@@ -161,10 +161,10 @@ def record_pipeline_event(payload, subpath, pipeline_records, pipeline_records_l
                         'status': status
                     }
                     
-                    # 将deploy_ip添加到对应的job记录中
+                    # 将deploy_ip添加到对应的job记录中，作为列表类型
                     # 特别是deploy阶段的job，应该包含deploy_ip
                     if deploy_ip and stage.lower() == 'deploy':
-                        job_record['deploy_ip'] = deploy_ip
+                        job_record['deploy_ip'] = [deploy_ip]  # 初始化为列表
                     
                     build_stages.append(job_record)
         
@@ -260,6 +260,7 @@ def record_pipeline_event(payload, subpath, pipeline_records, pipeline_records_l
                                         stage_name = new_stage.get('stage', '')
                                         job_name = new_stage.get('name', '')
                                         stage_status = new_stage.get('status', '')
+                                        new_deploy_ip = new_stage.get('deploy_ip', [])
                                         
                                         if stage_name:
                                             # 查找是否已存在相同stage和name的记录
@@ -268,6 +269,22 @@ def record_pipeline_event(payload, subpath, pipeline_records, pipeline_records_l
                                                 if existing_stage.get('stage') == stage_name and existing_stage.get('name') == job_name:
                                                     # 更新现有记录的status
                                                     existing_stage['status'] = stage_status
+                                                    
+                                                    # 更新deploy_ip列表，添加新的deploy_ip（如果有）
+                                                    if new_deploy_ip:
+                                                        # 确保现有记录的deploy_ip是列表
+                                                        if 'deploy_ip' not in existing_stage:
+                                                            existing_stage['deploy_ip'] = []
+                                                        elif not isinstance(existing_stage['deploy_ip'], list):
+                                                            # 如果是字符串，转换为列表
+                                                            existing_stage['deploy_ip'] = [existing_stage['deploy_ip']]
+                                                        
+                                                        # 添加新的deploy_ip，确保不重复
+                                                        for ip in new_deploy_ip:
+                                                            if ip not in existing_stage['deploy_ip']:
+                                                                existing_stage['deploy_ip'].append(ip)
+                                                                updated = True
+                                                    
                                                     found = True
                                                     updated = True
                                                     break

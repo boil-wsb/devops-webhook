@@ -1,0 +1,505 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>CD 记录管理</title>
+    <link rel="icon" type="image/x-icon" href="{{ url_for('static', filename='favicon.ico') }}">
+    <link rel="stylesheet" href="/static/styles.css">
+</head>
+<body>
+    <div class="cd-records-container">
+        <div style="padding: 24px 32px; background: linear-gradient(135deg, var(--btn-bg), var(--btn-hover)); display: flex; justify-content: space-between; align-items: center;">
+            <h1 style="margin: 0; padding: 0; background: none; font-size: 24px; font-weight: 600;">CD 记录管理</h1>
+            <a href="/pipelines/records/view" class="page-nav-btn" style="background-color: rgba(255,255,255,0.2); color: white; border: 1px solid rgba(255,255,255,0.3);">返回项目清单</a>
+        </div>
+        
+        <!-- 筛选区域 -->
+        <div class="filter-section">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px;">
+                <h2>筛选条件</h2>
+                <button class="theme-toggle" onclick="toggleTheme()">切换到深色模式</button>
+            </div>
+            <div class="filter-row">
+                <div class="filter-item">
+                    <label for="project-filter">项目名称:</label>
+                    <select id="project-filter"></select>
+                </div>
+                <div class="filter-item">
+                    <label for="branch-filter">分支:</label>
+                    <select id="branch-filter"></select>
+                </div>
+                <div class="filter-item">
+                    <label for="status-filter">状态:</label>
+                    <select id="status-filter">
+                        <option value="">全部状态</option>
+                        <option value="success">成功</option>
+                        <option value="failed">失败</option>
+                        <option value="pending">进行中</option>
+                    </select>
+                </div>
+                <div class="filter-item">
+                    <label for="search-filter">搜索:</label>
+                    <input type="text" id="search-filter" placeholder="输入搜索内容">
+                </div>
+                <div class="filter-item">
+                    <button class="filter-btn" onclick="applyFilters()">应用筛选</button>
+                    <button class="filter-btn" onclick="resetFilters()">重置</button>
+                </div>
+            </div>
+        </div>
+        
+        <!-- 记录列表 -->
+        <div class="records-section">
+            <div class="total-records" id="total-records"></div>
+            <table class="records-table" id="records-table">
+                <thead>
+                    <tr>
+                        <th onclick="sortTable(0)">项目名称 <span class="sort-indicator">▲</span></th>
+                        <th onclick="sortTable(1)">分支 <span class="sort-indicator"></span></th>
+                        <th onclick="sortTable(2)">提交人员 <span class="sort-indicator"></span></th>
+                        <th onclick="sortTable(3)">流水线ID <span class="sort-indicator"></span></th>
+                        <th onclick="sortTable(4)">推送时间 <span class="sort-indicator"></span></th>
+                        <th onclick="sortTable(5)">状态 <span class="sort-indicator"></span></th>
+                        <th>部署IP</th>
+                        <th onclick="sortTable(7)">提交信息 <span class="sort-indicator"></span></th>
+                    </tr>
+                </thead>
+                <tbody id="records-body">
+                    <!-- 记录将通过JavaScript动态生成 -->
+                </tbody>
+            </table>
+            
+            <!-- 分页 -->
+            <div class="pagination" id="pagination"></div>
+        </div>
+    </div>
+    
+    <script>
+        // 主题切换功能
+        function toggleTheme() {
+            const currentTheme = document.documentElement.getAttribute('data-theme');
+            const newTheme = currentTheme === 'dark' ? 'light' : 'dark';
+            
+            document.documentElement.setAttribute('data-theme', newTheme);
+            localStorage.setItem('theme', newTheme);
+            
+            // 更新按钮文本
+            const toggleBtn = document.querySelector('.theme-toggle');
+            toggleBtn.textContent = newTheme === 'dark' ? '切换到浅色模式' : '切换到深色模式';
+        }
+        
+        // 全局变量
+        let allRecords = [];
+        let filteredRecords = [];
+        let currentPage = 1;
+        let recordsPerPage = 10;
+        let currentSortColumn = 0;
+        let currentSortDirection = 'asc';
+        
+        // 初始化页面
+        document.addEventListener('DOMContentLoaded', function() {
+            // 初始化主题
+            const savedTheme = localStorage.getItem('theme') || 'light';
+            document.documentElement.setAttribute('data-theme', savedTheme);
+            
+            const toggleBtn = document.querySelector('.theme-toggle');
+            if (toggleBtn) {
+                toggleBtn.textContent = savedTheme === 'dark' ? '切换到浅色模式' : '切换到深色模式';
+            }
+            
+            fetchRecords();
+        });
+        
+        // 从API获取记录
+        async function fetchRecords() {
+            try {
+                // 使用当前页面的协议和域名，避免跨域问题
+                const apiUrl = window.location.origin + '/api/cd-records';
+                
+                const response = await fetch(apiUrl, {
+                    method: 'GET',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    credentials: 'same-origin'
+                });
+                
+                if (!response.ok) {
+                    // 获取响应文本，查看详细错误信息
+                    const errorText = await response.text();
+                    throw new Error(`HTTP error! status: ${response.status}, message: ${errorText}`);
+                }
+                
+                // 检查响应类型
+                const contentType = response.headers.get('content-type');
+                
+                if (!contentType || !contentType.includes('application/json')) {
+                    const errorText = await response.text();
+                    throw new Error(`Expected JSON response, got ${contentType}`);
+                }
+                
+                const data = await response.json();
+                
+                // 确保data.records是数组
+                allRecords = Array.isArray(data.records) ? data.records : [];
+                
+                // 初始化时按时间从晚到早排序
+                sortByTimeDesc();
+                
+                // 更新下拉选项
+                updateFilterOptions();
+                
+                // 调用筛选函数，渲染表格
+                applyFilters();
+            } catch (error) {
+                // 显示友好的错误信息
+                alert('获取CD记录失败，请刷新页面重试。');
+            }
+        }
+        
+        // 按时间从晚到早排序
+        function sortByTimeDesc() {
+            allRecords.sort((a, b) => {
+                const timeA = new Date(a.push_time || 0);
+                const timeB = new Date(b.push_time || 0);
+                // 从晚到早排序
+                return timeB - timeA;
+            });
+        }
+        
+        // 更新筛选选项
+        function updateFilterOptions() {
+            // 获取所有唯一的项目名称
+            const projectNames = [...new Set(allRecords.map(record => record.project_name))].filter(name => name);
+            
+            // 获取所有唯一的分支
+            const branches = [...new Set(allRecords.map(record => record.ref))].filter(branch => branch);
+            
+            // 更新项目名称下拉选项
+            const projectSelect = document.getElementById('project-filter');
+            if (projectSelect) {
+                // 清空现有选项，保留默认选项
+                projectSelect.innerHTML = '<option value="">全部项目</option>';
+                // 添加项目名称选项
+                projectNames.forEach(name => {
+                    const option = document.createElement('option');
+                    option.value = name;
+                    option.textContent = name;
+                    projectSelect.appendChild(option);
+                });
+            }
+            
+            // 更新分支下拉选项
+            const branchSelect = document.getElementById('branch-filter');
+            if (branchSelect) {
+                // 清空现有选项，保留默认选项
+                branchSelect.innerHTML = '<option value="">全部分支</option>';
+                // 添加分支选项
+                branches.forEach(branch => {
+                    const option = document.createElement('option');
+                    option.value = branch;
+                    option.textContent = branch;
+                    branchSelect.appendChild(option);
+                });
+            }
+        }
+        
+        // 应用筛选条件
+        function applyFilters() {
+            const projectFilter = document.getElementById('project-filter').value;
+            const branchFilter = document.getElementById('branch-filter').value;
+            const statusFilter = document.getElementById('status-filter').value;
+            const searchFilter = document.getElementById('search-filter').value.toLowerCase();
+            
+            filteredRecords = allRecords.filter(record => {
+                // 确保record是对象
+                if (typeof record !== 'object' || record === null) {
+                    return false;
+                }
+                
+                // 项目名称筛选（下拉选择框，精确匹配）
+                const projectName = record.project_name || '';
+                const matchesProject = !projectFilter || projectName === projectFilter;
+                
+                // 分支筛选（下拉选择框，精确匹配）
+                const ref = record.ref || '';
+                const matchesBranch = !branchFilter || ref === branchFilter;
+                
+                // 状态筛选
+                const pipelineStatus = record.pipeline_status || '';
+                const matchesStatus = !statusFilter || pipelineStatus === statusFilter;
+                
+                // 全局搜索功能
+                let matchesSearch = true;
+                if (searchFilter) {
+                    // 搜索所有字段
+                    const searchText = searchFilter;
+                    const projectNameLower = projectName.toLowerCase();
+                    const refLower = ref.toLowerCase();
+                    const userName = (record.user_name || '').toLowerCase();
+                    const pipelineId = (record.pipeline_iid || '').toString();
+                    const pushTime = (record.push_time || '').toLowerCase();
+                    const message = (record.message || '').toLowerCase();
+                    const deployIps = Array.isArray(record.deploy_ips) ? record.deploy_ips : [];
+                    const deployIpsLower = deployIps.map(ip => (ip || '').toLowerCase());
+                    
+                    matchesSearch = projectNameLower.includes(searchText) ||
+                                  refLower.includes(searchText) ||
+                                  userName.includes(searchText) ||
+                                  pipelineId.includes(searchText) ||
+                                  pushTime.includes(searchText) ||
+                                  message.includes(searchText) ||
+                                  deployIpsLower.some(ip => ip.includes(searchText));
+                }
+                
+                return matchesProject && matchesBranch && matchesStatus && matchesSearch;
+            });
+            
+            // 调用排序函数
+            sortTable(currentSortColumn, currentSortDirection);
+        }
+        
+        // 排序表格
+        function sortTable(columnIndex, direction = null) {
+            // 设置排序方向
+            if (direction === null) {
+                if (currentSortColumn === columnIndex) {
+                    currentSortDirection = currentSortDirection === 'asc' ? 'desc' : 'asc';
+                } else {
+                    currentSortDirection = 'asc';
+                }
+                currentSortColumn = columnIndex;
+            } else {
+                currentSortDirection = direction;
+            }
+            
+            // 更新排序指示器
+            updateSortIndicators(columnIndex);
+            
+            // 排序记录
+            filteredRecords.sort((a, b) => {
+                // 确保a和b是对象
+                if (typeof a !== 'object' || a === null) return 1;
+                if (typeof b !== 'object' || b === null) return -1;
+                
+                let aVal, bVal;
+                
+                switch (columnIndex) {
+                    case 0: // 项目名称
+                        aVal = (a.project_name || '').toLowerCase();
+                        bVal = (b.project_name || '').toLowerCase();
+                        break;
+                    case 1: // 分支
+                        aVal = (a.ref || '').toLowerCase();
+                        bVal = (b.ref || '').toLowerCase();
+                        break;
+                    case 2: // 提交人员
+                        aVal = (a.user_name || '').toLowerCase();
+                        bVal = (b.user_name || '').toLowerCase();
+                        break;
+                    case 3: // 流水线ID
+                        aVal = parseInt(a.pipeline_iid) || 0;
+                        bVal = parseInt(b.pipeline_iid) || 0;
+                        break;
+                    case 4: // 推送时间
+                        aVal = new Date(a.push_time || 0);
+                        bVal = new Date(b.push_time || 0);
+                        break;
+                    case 7: // 提交信息
+                        aVal = (a.message || '').toLowerCase();
+                        bVal = (b.message || '').toLowerCase();
+                        break;
+                    default:
+                        return 0;
+                }
+                
+                // 处理日期对象无效的情况
+                if (isNaN(aVal.getTime ? aVal.getTime() : aVal)) {
+                    aVal = '';
+                }
+                if (isNaN(bVal.getTime ? bVal.getTime() : bVal)) {
+                    bVal = '';
+                }
+                
+                if (aVal < bVal) return currentSortDirection === 'asc' ? -1 : 1;
+                if (aVal > bVal) return currentSortDirection === 'asc' ? 1 : -1;
+                return 0;
+            });
+            
+            currentPage = 1;
+            renderTable();
+        }
+        
+        // 更新排序指示器
+        function updateSortIndicators(sortedColumnIndex) {
+            const headers = document.querySelectorAll('.records-table th');
+            headers.forEach((header, index) => {
+                const indicator = header.querySelector('.sort-indicator');
+                // 检查indicator是否存在，避免TypeError
+                if (indicator) {
+                    if (index === sortedColumnIndex) {
+                        indicator.textContent = currentSortDirection === 'asc' ? '▲' : '▼';
+                    } else {
+                        indicator.textContent = '';
+                    }
+                }
+            });
+        }
+        
+        // 渲染表格
+        function renderTable() {
+            const tableBody = document.getElementById('records-body');
+            const totalPages = Math.ceil(filteredRecords.length / recordsPerPage);
+            const startIndex = (currentPage - 1) * recordsPerPage;
+            const endIndex = startIndex + recordsPerPage;
+            const pageRecords = filteredRecords.slice(startIndex, endIndex);
+            
+            // 更新总记录数
+            document.getElementById('total-records').textContent = `共 ${filteredRecords.length} 条记录`;
+            
+            // 清空表格
+            tableBody.innerHTML = '';
+            
+            // 渲染记录
+                pageRecords.forEach(record => {
+                    // 确保record是对象
+                    if (typeof record !== 'object' || record === null) {
+                        return;
+                    }
+                
+                const row = tableBody.insertRow();
+                
+                // 项目名称
+                const projectCell = row.insertCell();
+                projectCell.textContent = record.project_name || '';
+                
+                // 分支
+                const branchCell = row.insertCell();
+                branchCell.textContent = record.ref || '';
+                
+                // 提交人员
+                const userCell = row.insertCell();
+                userCell.textContent = record.user_name || '';
+                
+                // 流水线ID
+                const pipelineCell = row.insertCell();
+                pipelineCell.textContent = record.pipeline_iid || '';
+                
+                // 推送时间
+                const timeCell = row.insertCell();
+                const pushTime = record.push_time;
+                if (pushTime) {
+                    try {
+                        const date = new Date(pushTime);
+                        if (!isNaN(date.getTime())) {
+                            timeCell.textContent = date.toLocaleString('zh-CN');
+                        } else {
+                            timeCell.textContent = pushTime;
+                        }
+                    } catch (error) {
+                        timeCell.textContent = pushTime;
+                    }
+                } else {
+                    timeCell.textContent = '';
+                }
+                
+                // 状态
+                const statusCell = row.insertCell();
+                const statusSpan = document.createElement('span');
+                const pipelineStatus = record.pipeline_status || 'unknown';
+                statusSpan.className = `status-${pipelineStatus}`;
+                statusSpan.textContent = pipelineStatus === 'unknown' ? '未知' : pipelineStatus;
+                statusCell.appendChild(statusSpan);
+                
+                // 部署IP
+                const ipCell = row.insertCell();
+                const ipList = document.createElement('div');
+                ipList.className = 'deploy-ip-list';
+                
+                const deployIps = Array.isArray(record.deploy_ips) ? record.deploy_ips : [];
+                deployIps.forEach(ip => {
+                    if (ip) {
+                        const ipSpan = document.createElement('span');
+                        ipSpan.className = 'deploy-ip';
+                        ipSpan.textContent = ip;
+                        ipList.appendChild(ipSpan);
+                    }
+                });
+                ipCell.appendChild(ipList);
+                
+                // 提交信息
+                const messageCell = row.insertCell();
+                const fullMessage = record.message || '';
+                
+                // 创建一个包装div，用于实现多行截断和tooltip
+                const messageWrapper = document.createElement('div');
+                messageWrapper.textContent = fullMessage;
+                messageWrapper.setAttribute('data-tooltip', fullMessage);
+                messageWrapper.className = 'message-content';
+                
+                messageCell.appendChild(messageWrapper);
+            });
+            
+            // 渲染分页
+            renderPagination();
+        }
+        
+        // 重置筛选条件
+        function resetFilters() {
+            document.getElementById('project-filter').value = '';
+            document.getElementById('branch-filter').value = '';
+            document.getElementById('status-filter').value = '';
+            document.getElementById('search-filter').value = '';
+            applyFilters();
+        }
+        
+        // 渲染分页
+        function renderPagination() {
+            const pagination = document.getElementById('pagination');
+            const totalPages = Math.ceil(filteredRecords.length / recordsPerPage);
+            
+            pagination.innerHTML = '';
+            
+            // 上一页按钮
+            const prevBtn = document.createElement('button');
+            prevBtn.textContent = '上一页';
+            prevBtn.disabled = currentPage === 1;
+            prevBtn.onclick = () => {
+                if (currentPage > 1) {
+                    currentPage--;
+                    renderTable();
+                }
+            };
+            pagination.appendChild(prevBtn);
+            
+            // 页码按钮
+            const startPage = Math.max(1, currentPage - 2);
+            const endPage = Math.min(totalPages, currentPage + 2);
+            
+            for (let i = startPage; i <= endPage; i++) {
+                const pageBtn = document.createElement('button');
+                pageBtn.textContent = i;
+                pageBtn.className = i === currentPage ? 'active' : '';
+                pageBtn.onclick = () => {
+                    currentPage = i;
+                    renderTable();
+                };
+                pagination.appendChild(pageBtn);
+            }
+            
+            // 下一页按钮
+            const nextBtn = document.createElement('button');
+            nextBtn.textContent = '下一页';
+            nextBtn.disabled = currentPage === totalPages;
+            nextBtn.onclick = () => {
+                if (currentPage < totalPages) {
+                    currentPage++;
+                    renderTable();
+                }
+            };
+            pagination.appendChild(nextBtn);
+        }
+    </script>
+</body>
+</html>
