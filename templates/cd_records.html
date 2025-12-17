@@ -11,7 +11,7 @@
     <div class="cd-records-container">
         <div style="padding: 24px 32px; background: linear-gradient(135deg, var(--btn-bg), var(--btn-hover)); display: flex; justify-content: space-between; align-items: center;">
             <h1 style="margin: 0; padding: 0; background: none; font-size: 24px; font-weight: 600;">CD 记录管理</h1>
-            <a href="/pipelines/records/view" class="page-nav-btn" style="background-color: rgba(255,255,255,0.2); color: white; border: 1px solid rgba(255,255,255,0.3);">返回项目清单</a>
+            <a href="{{ return_url }}" class="page-nav-btn" style="background-color: rgba(255,255,255,0.2); color: white; border: 1px solid rgba(255,255,255,0.3);">返回项目清单</a>
         </div>
         
         <!-- 筛选区域 -->
@@ -114,8 +114,24 @@
         // 从API获取记录
         async function fetchRecords() {
             try {
-                // 使用当前页面的协议和域名，避免跨域问题
-                const apiUrl = window.location.origin + '/api/cd-records';
+                // 从URL中获取subpath参数：优先从查询参数获取，其次从路径获取
+                const urlParams = new URLSearchParams(window.location.search);
+                let subpath = urlParams.get('subpath');
+                
+                // 如果查询参数中没有subpath，则从URL路径中提取
+                if (!subpath) {
+                    const pathSegments = window.location.pathname.split('/');
+                    // 路径格式：/cd-records/PD3 或 /cd-records/PD3/xxx
+                    if (pathSegments.length > 2 && pathSegments[1] === 'cd-records') {
+                        subpath = pathSegments[2];
+                    }
+                }
+                
+                // 构建API URL，包含subpath参数
+                let apiUrl = window.location.origin + '/api/cd-records';
+                if (subpath) {
+                    apiUrl += `?subpath=${encodeURIComponent(subpath)}`;
+                }
                 
                 const response = await fetch(apiUrl, {
                     method: 'GET',
@@ -241,6 +257,7 @@
                     const pipelineId = (record.pipeline_iid || '').toString();
                     const pushTime = (record.push_time || '').toLowerCase();
                     const message = (record.message || '').toLowerCase();
+                    const subpath = (record.subpath || '').toLowerCase();
                     const deployIps = Array.isArray(record.deploy_ips) ? record.deploy_ips : [];
                     const deployIpsLower = deployIps.map(ip => (ip || '').toLowerCase());
                     
@@ -249,6 +266,7 @@
                                   userName.includes(searchText) ||
                                   pipelineId.includes(searchText) ||
                                   pushTime.includes(searchText) ||
+                                  subpath.includes(searchText) ||
                                   message.includes(searchText) ||
                                   deployIpsLower.some(ip => ip.includes(searchText));
                 }
@@ -305,6 +323,10 @@
                     case 4: // 推送时间
                         aVal = new Date(a.push_time || 0);
                         bVal = new Date(b.push_time || 0);
+                        break;
+                    case 5: // 状态
+                        aVal = (a.pipeline_status || '').toLowerCase();
+                        bVal = (b.pipeline_status || '').toLowerCase();
                         break;
                     case 7: // 提交信息
                         aVal = (a.message || '').toLowerCase();

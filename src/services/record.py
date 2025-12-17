@@ -249,6 +249,9 @@ def record_pipeline_event(payload, subpath, pipeline_records, pipeline_records_l
                                 # 插入pipeline_iid
                                 commit['pipeline_iid'] = pipeline_iid
                                 
+                                # 添加subpath信息到push_record
+                                push_record['subpath'] = subpath
+                                
                                 # 记录build stages，根据stage和name更新status，避免重复
                                 if build_stages:
                                     # 确保stages字段存在且是列表

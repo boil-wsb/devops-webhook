@@ -18,7 +18,7 @@
             <!-- 左侧控制 -->
             <div class="control-left">
                 <button class="refresh-btn" onclick="location.reload()">刷新记录</button>
-                <button class="page-nav-btn" onclick="location.href='/cd-records'">查看CD记录</button>
+                <button class="page-nav-btn" onclick="goToCDRecords()">查看CD记录</button>
             </div>
             
             <!-- 右侧控制 -->
@@ -280,6 +280,19 @@
             layoutBtns.forEach(btn => btn.classList.remove('active'));
             layoutBtns[savedLayout - 1].classList.add('active');
         });
+        
+        // 跳转到CD记录页面，传递当前URL作为返回地址
+        function goToCDRecords() {
+            const currentUrl = window.location.pathname;
+            // 提取/pipelines/records/view/xxx中的xxx部分
+            const match = currentUrl.match(/^\/pipelines\/records\/view\/(.*)$/);
+            let returnUrl = '';
+            if (match && match[1]) {
+                returnUrl = `/${match[1].replace(/\//g, '__')}`;
+            }
+            // 跳转到CD记录页面
+            window.location.href = `/cd-records${returnUrl}`;
+        }
         
         // 筛选记录功能
         function filterRecords() {

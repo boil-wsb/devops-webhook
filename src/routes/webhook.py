@@ -57,6 +57,7 @@ def process_webhook(request, route_name, subpath=None):
                     'ref': ref,
                     'user_name': user_name,
                     'git_url': git_url,
+                    'subpath': subpath,
                     'commits': [
                         {
                             'url': commit.get('url', ''),

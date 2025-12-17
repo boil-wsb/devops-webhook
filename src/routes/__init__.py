@@ -439,6 +439,7 @@ def register_routes(app):
     def cd_records_api():
         """
         获取CD记录API，返回存在pipeline_iid的记录
+        支持根据subpath参数筛选记录
         """
         from src.services import push_records, push_records_lock
         import json
@@ -446,6 +447,9 @@ def register_routes(app):
         import logging
         
         try:
+            # 获取subpath筛选参数
+            subpath_filter = request.args.get('subpath')
+            
             # 先从内存中获取所有push记录
             all_records = []
             with push_records_lock:
@@ -460,6 +464,10 @@ def register_routes(app):
             # 筛选出存在pipeline_iid的CD记录
             cd_records = []
             for record in all_records:
+                # 如果提供了subpath筛选参数，且当前记录的subpath不匹配，则跳过
+                if subpath_filter and record.get('subpath') != subpath_filter:
+                    continue
+                    
                 commits = record.get('commits', [])
                 if isinstance(commits, list):
                     for commit in commits:
@@ -498,7 +506,8 @@ def register_routes(app):
                                     'push_time': commit.get('timestamp', ''),
                                     'pipeline_status': commit.get('pipeline_status', ''),
                                     'deploy_ips': deploy_ips,
-                                    'message': commit.get('message', '')
+                                    'message': commit.get('message', ''),
+                                    'subpath': record.get('subpath', '')
                                 }
                                 cd_records.append(cd_record)
             
@@ -522,9 +531,16 @@ def register_routes(app):
             }), 200
     
     @app.route('/cd-records')
-    def cd_records_view():
+    @app.route('/cd-records/<path:return_url>')
+    def cd_records_view(return_url=None):
         """
         CD记录管理页面
         """
-        return render_template('cd_records.html')
+        if return_url:
+            # 还原URL编码的斜杠
+            return_url = return_url.replace('__', '/')
+            full_return_url = f"/pipelines/records/view/{return_url}"
+        else:
+            full_return_url = "/pipelines/records/view"
+        return render_template('cd_records.html', return_url=full_return_url)
 
