@@ -24,12 +24,12 @@
             <!-- 右侧控制 -->
             <div class="control-right">
                 <!-- 布局切换 -->
-                <div class="layout-toggle">
-                    <span class="layout-label">布局:</span>
-                    <button class="layout-btn" onclick="setLayout(1)">1列</button>
-                    <button class="layout-btn active" onclick="setLayout(2)">2列</button>
-                    <button class="layout-btn" onclick="setLayout(3)">3列</button>
-                </div>
+        <div class="layout-toggle">
+            <span class="layout-label">布局:</span>
+            <button class="layout-btn" onclick="setLayout(1)">1列</button>
+            <button class="layout-btn" onclick="setLayout(2)">2列</button>
+            <button class="layout-btn active" onclick="setLayout(3)">3列</button>
+        </div>
                 
                 <!-- 主题切换 -->
                 <button class="theme-toggle" onclick="toggleTheme()">切换到深色模式</button>
@@ -78,10 +78,6 @@
                         <div class="record-field">
                             <span class="field-label">完整路径:</span>
                             <span class="field-value">{{ record.path_with_namespace or 'N/A' }}</span>
-                        </div>
-                        <div class="record-field">
-                            <span class="field-label">Git地址:</span>
-                            <span class="field-value">{{ record.git_url or 'N/A' }}</span>
                         </div>
                         {% if record.subpath == 'PD3' or record.subpath == 'edge' %}
                             <div class="record-field">
@@ -269,7 +265,7 @@
             toggleBtn.textContent = savedTheme === 'dark' ? '切换到浅色模式' : '切换到深色模式';
             
             // 初始化布局
-            const savedLayout = parseInt(localStorage.getItem('layout')) || 2;
+            const savedLayout = parseInt(localStorage.getItem('layout')) || 3;
             const cardsContainer = document.querySelector('.cards-container');
             const layoutBtns = document.querySelectorAll('.layout-btn');
             
@@ -450,12 +446,11 @@
                                 </div>
                             </div>
                             <div class="push-record-detail">
-                                <div class="commits-list">
-                            `;
+                    `;
                     
                     // 处理提交记录
                     if (record.commits && record.commits.length > 0) {
-                        // 默认只显示第一条提交记录
+                        // 直接显示第一条提交记录，不包裹在上层容器内
                         const firstCommit = record.commits[0];
                         html += `
                             <div class="commit-item" id="commit-${index}-0">
@@ -502,7 +497,7 @@
                         html += '<div class="no-commits">无提交记录</div>';
                     }
                     
-                    html += '</div></div></div>';
+                    html += '</div></div>';
                 });
                 
                 html += '</div>';

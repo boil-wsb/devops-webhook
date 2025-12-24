@@ -356,6 +356,7 @@ h2 {
 .record-field {
     margin-bottom: 8px;
     display: flex;
+    gap: 2px; /* 调整标签与值之间的间距 */
     overflow-wrap: break-word;
 }
 
@@ -365,6 +366,7 @@ h2 {
     color: var(--label-color);
     overflow-wrap: break-word;
     word-break: break-all;
+    margin-right: 4px; /* 调整标签与值之间的间距 */
 }
 
 .field-value {
@@ -372,6 +374,7 @@ h2 {
     color: var(--text-color);
     overflow-wrap: break-word;
     word-break: break-all;
+    margin-right: 4px;
 }
 
 /* 标签样式 */
@@ -678,8 +681,7 @@ h2 {
 /* 提交记录样式 */
 .commits-list {
     margin-top: 15px;
-    border-top: 1px solid var(--border-color);
-    padding-top: 15px;
+    padding-top: 10px;
 }
 
 .commit-item {
@@ -1071,6 +1073,7 @@ h2 {
     position: relative;
     padding: 0;
     margin: 0;
+    cursor: help;
 }
 
 /* 自定义tooltip样式 */
@@ -1078,12 +1081,17 @@ h2 {
     position: relative;
 }
 
-.message-content:hover::after {
+.records-table td:nth-child(8) {
+    position: relative;
+    cursor: help;
+}
+
+.records-table td:nth-child(8):hover::after {
     content: attr(data-tooltip);
-    position: absolute;
-    top: -10px;
-    right: 10px;
-    transform: translateY(-100%);
+    position: fixed;
+    top: 20px;
+    left: 50%;
+    transform: translateX(-50%);
     background-color: var(--text-color);
     color: var(--bg-color);
     padding: 10px 12px;
@@ -1092,11 +1100,13 @@ h2 {
     font-size: 14px;
     line-height: 1.4;
     white-space: pre-wrap;
-    max-width: 400px;
-    z-index: 100;
+    max-width: 80%;
+    max-height: 400px;
+    overflow-y: auto;
+    z-index: 9999;
     pointer-events: none;
     opacity: 1;
-    transition: opacity 0.2s ease;
+    border: 1px solid var(--border-color);
 }
 
 /* 深色模式下的tooltip样式 */

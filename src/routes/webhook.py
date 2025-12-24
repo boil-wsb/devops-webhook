@@ -91,7 +91,7 @@ def process_webhook(request, route_name, subpath=None):
                 
                 try:
                     message = format_message(payload, running_builds, running_builds_lock, route_name, push_records, push_records_lock)
-                    
+                    print(f"Generated message: {message}")
                     if message:
                         # 检查是否为失败的pipeline记录
                         status = payload['object_attributes'].get('status', '')

@@ -454,10 +454,12 @@
                 const messageCell = row.insertCell();
                 const fullMessage = record.message || '';
                 
-                // 创建一个包装div，用于实现多行截断和tooltip
+                // 设置td的tooltip属性
+                messageCell.setAttribute('data-tooltip', fullMessage);
+                
+                // 创建一个包装div，用于实现多行截断
                 const messageWrapper = document.createElement('div');
                 messageWrapper.textContent = fullMessage;
-                messageWrapper.setAttribute('data-tooltip', fullMessage);
                 messageWrapper.className = 'message-content';
                 
                 messageCell.appendChild(messageWrapper);
