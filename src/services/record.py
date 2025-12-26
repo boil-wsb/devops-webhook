@@ -233,7 +233,7 @@ def record_pipeline_event(payload, subpath, pipeline_records, pipeline_records_l
                 # 使用标准的logging模块记录错误
                 app_logger.error(f"写入project.json文件时发生错误: {str(e)}")
             
-            # 检查push_records.json是否存在，并且存在一致的commit url记录，将pipeline_iid插入对应记录内
+            # 检查push_records.json是否存在，并且存在一致的commit url和ref记录，将pipeline_iid插入对应记录内
         try:
             push_file_path = 'push_records.json'
             if os.path.exists(push_file_path) and commit_url:
@@ -241,8 +241,29 @@ def record_pipeline_event(payload, subpath, pipeline_records, pipeline_records_l
                 # 这样可以确保全局列表与文件内容一致
                 updated = False
                 for push_record in push_records:
+                    # 处理push_record的ref，去除前缀
+                    record_ref = push_record.get('ref', '')
+                    if record_ref.startswith('refs/heads/'):
+                        processed_record_ref = record_ref.replace('refs/heads/', '')
+                    elif record_ref.startswith('refs/tags/'):
+                        processed_record_ref = record_ref.replace('refs/tags/', '')
+                    elif record_ref.startswith('refs/remotes/'):
+                        processed_record_ref = record_ref.replace('refs/remotes/', '')
+                    else:
+                        processed_record_ref = record_ref
+                    
+                    # 处理branch，去除前缀
+                    processed_branch = branch
+                    if processed_branch.startswith('refs/heads/'):
+                        processed_branch = processed_branch.replace('refs/heads/', '')
+                    elif processed_branch.startswith('refs/tags/'):
+                        processed_branch = processed_branch.replace('refs/tags/', '')
+                    elif processed_branch.startswith('refs/remotes/'):
+                        processed_branch = processed_branch.replace('refs/remotes/', '')
+                    
                     # 检查push_record是否包含commits字段，并且commits是列表
-                    if isinstance(push_record.get('commits'), list):
+                    # 同时检查push_record的ref是否与当前pipeline事件的ref一致（去除前缀后）
+                    if isinstance(push_record.get('commits'), list) and processed_record_ref == processed_branch:
                         for commit in push_record['commits']:
                             # 检查commit url是否匹配
                             if commit.get('url') == commit_url:

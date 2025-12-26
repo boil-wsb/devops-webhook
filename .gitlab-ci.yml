@@ -45,3 +45,22 @@ deploy-docker:
       docker-compose -f $REMOTE_DIR/docker-compose.yml up -d
       EOF
   # Run this job in a branch where a Dockerfile exists
+  after_script:
+    # - docker rmi dangling
+    - |
+      IMAGE_IDS=$(docker images --format "{{.ID}} {{.Repository}}" | grep "${REGISTRY_URL}/${DOCKER_IMAGE}" | awk '{print $1}')
+      if [ -z "$IMAGE_IDS" ]; then
+        echo "No images found for ${IMAGE_NAME}";
+      else
+        echo "Removing images:";
+        for IMAGE_ID in $IMAGE_IDS; do
+          # 检查镜像是否被任何容器使用
+          CONTAINER_IDS=$(docker ps -a --filter "ancestor=$IMAGE_ID" --format "{{.ID}}")
+          if [ -z "$CONTAINER_IDS" ]; then
+            echo "Removing image $IMAGE_ID"
+            docker rmi -f $IMAGE_ID
+          else
+            echo "Image $IMAGE_ID is in use by containers: $CONTAINER_IDS. Skipping."
+          fi
+        done;
+      fi
