@@ -114,31 +114,59 @@ def _find_deploy_ip(commit_url, push_records, push_records_lock, payload, app_lo
     deploy_ip = ''
     if commit_url:
         try:
+            # 从payload中提取当前的ref
+            current_ref = payload.get('object_attributes', {}).get('ref', '')
+            app_logger.info(f"Current ref from payload: {current_ref}")
+            
+            # 处理current_ref，去除前缀
+            processed_current_ref = current_ref
+            if processed_current_ref.startswith('refs/heads/'):
+                processed_current_ref = processed_current_ref.replace('refs/heads/', '')
+            elif processed_current_ref.startswith('refs/tags/'):
+                processed_current_ref = processed_current_ref.replace('refs/tags/', '')
+            elif processed_current_ref.startswith('refs/remotes/'):
+                processed_current_ref = processed_current_ref.replace('refs/remotes/', '')
+            app_logger.info(f"Processed current ref: {processed_current_ref}")
+            
             # 从push_records中查找对应的deploy_ip
             if push_records and push_records_lock:
-                app_logger.info(f"Searching deploy_ip from push_records for commit_url: {commit_url}")
+                app_logger.info(f"Searching deploy_ip from push_records for commit_url: {commit_url} and ref: {processed_current_ref}")
                 with push_records_lock:
                     app_logger.info(f"Current push_records count: {len(push_records)}")
                     found_deploy_ip = False
                     
                     for push_record in push_records:
+                        # 处理push_record的ref，去除前缀
+                        record_ref = push_record.get('ref', '')
+                        processed_record_ref = record_ref
+                        if processed_record_ref.startswith('refs/heads/'):
+                            processed_record_ref = processed_record_ref.replace('refs/heads/', '')
+                        elif processed_record_ref.startswith('refs/tags/'):
+                            processed_record_ref = processed_record_ref.replace('refs/tags/', '')
+                        elif processed_record_ref.startswith('refs/remotes/'):
+                            processed_record_ref = processed_record_ref.replace('refs/remotes/', '')
+                        
+                        # 查找匹配的commit_url和相同ref的记录
                         commits = push_record.get('commits', [])
                         if not isinstance(commits, list):
                             continue
                         
-                        matching_commit = next((c for c in commits if c.get('url') == commit_url), None)
-                        if matching_commit:
-                            app_logger.info(f"Found matching commit in push_records")
-                            stages = matching_commit.get('stages', [])
-                            deploy_stage = next((s for s in stages if isinstance(s, dict) and s.get('deploy_ip')), None)
-                            if deploy_stage:
-                                deploy_ip = deploy_stage.get('deploy_ip', '')
-                                if deploy_ip:
-                                    app_logger.info(f"Found deploy_ip from push_records: {deploy_ip}")
-                                    found_deploy_ip = True
-                                    break
-                        if found_deploy_ip:
-                            break
+                        # 首先检查ref是否匹配
+                        if processed_record_ref == processed_current_ref:
+                            # 然后查找commit_url匹配的记录
+                            matching_commit = next((c for c in commits if c.get('url') == commit_url), None)
+                            if matching_commit:
+                                app_logger.info(f"Found matching commit with same ref in push_records")
+                                stages = matching_commit.get('stages', [])
+                                deploy_stage = next((s for s in stages if isinstance(s, dict) and s.get('deploy_ip')), None)
+                                if deploy_stage:
+                                    deploy_ip = deploy_stage.get('deploy_ip', '')
+                                    if deploy_ip:
+                                        app_logger.info(f"Found deploy_ip from push_records: {deploy_ip}")
+                                        found_deploy_ip = True
+                                        break
+                            if found_deploy_ip:
+                                break
             
             # 如果push_records中没有找到，尝试从payload中查找
             if not deploy_ip:
