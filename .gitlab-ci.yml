@@ -66,9 +66,6 @@ setup-env:
     - <<: *if-release-branch # release-*
       variables:
         IMAGE_TAG: "${CI_COMMIT_REF_NAME}"
-    - <<: *if-release-branch-merge # release-*
-      variables:
-        IMAGE_TAG: "${CI_COMMIT_REF_NAME}"
     - <<: *if-other-branch # feature-* || hotfix-*
       variables:
         IMAGE_TAG: "${CI_COMMIT_REF_NAME}-${VERSION}"
