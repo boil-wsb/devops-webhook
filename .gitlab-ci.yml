@@ -9,6 +9,75 @@ variables:
   REMOTE_HOST: "192.168.23.31"
   REMOTE_DIR: "/opt/monitor/webhook"
 
+### RULES REUSED VIA YAML ANCHORS:
+.if-release-branch: &if-release-branch
+  if: '($CI_COMMIT_REF_NAME =~ /release/) && $CI_PIPELINE_SOURCE != "merge_request_event"'
+
+.if-release-branch-merge: &if-release-branch-merge
+  if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+
+.if-dev-int-branch: &if-dev-int-branch
+  if: '($CI_COMMIT_REF_NAME =~ /develop/) && $CI_PIPELINE_SOURCE != "merge_request_event" && $DEPLOYER != "test"'
+
+.if-test-int-branch: &if-test-int-branch
+  if: '$CI_PIPELINE_SOURCE != "merge_request_event" && $CI_PIPELINE_SOURCE == "web" && $DEPLOYER == "test"'
+
+.if-other-branch: &if-other-branch
+  if: '($CI_COMMIT_REF_NAME =~ /feature/ || $CI_COMMIT_REF_NAME =~ /hotfix/) && $CI_PIPELINE_SOURCE == "merge_request_event"'
+
+.if-master-branch: &if-master-branch
+  if: '($CI_COMMIT_REF_NAME == $CI_DEFAULT_BRANCH) && $CI_PIPELINE_SOURCE != "merge_request_event"'
+
+.if-merge-request: &if-merge-request
+  if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+
+.if-match-trigger-branch: &if-match-trigger-branch
+  if: '($CI_COMMIT_REF_NAME == $TRIGGER_BRANCH) && $CI_PIPELINE_SOURCE != "merge_request_event"'
+
+
+workflow:
+  rules:
+    # Trigger conditions inherited from base-devsecops
+    - <<: *if-other-branch
+      when: never
+    - if: $CI_MERGE_REQUEST_IID
+    - if: $CI_PIPELINE_SOURCE == "schedule"
+    - if: $CI_PIPELINE_SOURCE == "web"
+    - <<: *if-dev-int-branch # dev-*
+    - <<: *if-test-int-branch # test
+    - <<: *if-release-branch # release-*
+    - <<: *if-release-branch-merge
+    - <<: *if-master-branch # master
+    - <<: *if-merge-request
+
+# setup Stage
+setup-env:
+  stage: setup
+  rules:
+    # dynamic generates the image tag based on the branch or event triggers the pipeline
+    - <<: *if-dev-int-branch # develop-*
+      # Trigger condition for DEV deployment, if committing some code to the branch which prefix is "develop", then trigger current pipeline
+      variables:
+        IMAGE_TAG: "${CI_COMMIT_REF_NAME}-${VERSION}"
+    - <<: *if-test-int-branch # test-*
+      variables:
+        IMAGE_TAG: "${CI_COMMIT_REF_NAME}"
+    - <<: *if-release-branch # release-*
+      variables:
+        IMAGE_TAG: "${CI_COMMIT_REF_NAME}"
+    - <<: *if-release-branch-merge # release-*
+      variables:
+        IMAGE_TAG: "${CI_COMMIT_REF_NAME}"
+    - <<: *if-other-branch # feature-* || hotfix-*
+      variables:
+        IMAGE_TAG: "${CI_COMMIT_REF_NAME}-${VERSION}"
+    - <<: *if-master-branch # master
+      variables:
+        IMAGE_TAG: "${VERSION}"
+  script:
+    - echo "VERSION=${VERSION}"
+    - echo "IMAGE_TAG=${IMAGE_TAG}"
+
 
 docker-build:
   # Use the official docker image.
@@ -26,7 +95,7 @@ docker-build:
     - docker push $REGISTRY_URL/$DOCKER_IMAGE_NAME
   # Run this job in a branch where a Dockerfile exists
   rules:
-    - if: $CI_COMMIT_BRANCH
+    - <<: *if-master-branch # master
       exists:
         - Dockerfile
 
@@ -64,3 +133,5 @@ deploy-docker:
           fi
         done;
       fi
+  rules:
+    - <<: *if-master-branch # master
