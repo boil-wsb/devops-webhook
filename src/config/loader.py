@@ -8,7 +8,7 @@ def load_config(config_file='config.conf'):
     Args:
         config_file: 配置文件路径 
     Returns:
-        tuple: (WEBHOOK_CONFIG, DEFAULT_TARGET_URL, MINIO_CONFIG)
+        tuple: (WEBHOOK_CONFIG, DEFAULT_TARGET_URL, MINIO_CONFIG, SKIP_TIMEOUT_CHECK, TIMEOUT_SECONDS)
     """
     config_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', '..', config_file)
     
@@ -24,7 +24,9 @@ def load_config(config_file='config.conf'):
             'minio_endpoint': 'http://192.168.23.36:9000',
             'minio_access_key': 'fYIukgJZaLOivnFimLVX',
             'minio_secret_key': 'shdyfYIukgJZaLOivnFimLVX123',
-        }
+        },
+        'skip_timeout_check': [],
+        'timeout_seconds': {}
     }
     
     try:
@@ -34,10 +36,12 @@ def load_config(config_file='config.conf'):
                 webhook_config = config.get('webhook_config', default_config['webhook_config'])
                 default_target_url = config.get('default_target_url', default_config['default_target_url'])
                 minio_config = config.get('minio_config', default_config['minio_config'])
-                return webhook_config, default_target_url, minio_config
+                skip_timeout_check = config.get('skip_timeout_check', default_config['skip_timeout_check'])
+                timeout_seconds = config.get('timeout_seconds', default_config['timeout_seconds'])
+                return webhook_config, default_target_url, minio_config, skip_timeout_check, timeout_seconds
         else:
             # 如果配置文件不存在，使用默认配置
-            return default_config['webhook_config'], default_config['default_target_url'], default_config['minio_config']
+            return default_config['webhook_config'], default_config['default_target_url'], default_config['minio_config'], default_config['skip_timeout_check'], default_config['timeout_seconds']
     except json.JSONDecodeError as e:
         # 配置文件格式错误，使用默认配置
-        return default_config['webhook_config'], default_config['default_target_url'], default_config['minio_config']
+        return default_config['webhook_config'], default_config['default_target_url'], default_config['minio_config'], default_config['skip_timeout_check'], default_config['timeout_seconds']
