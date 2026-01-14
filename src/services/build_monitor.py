@@ -1,7 +1,7 @@
 import time
 from datetime import datetime
 import threading
-from src.config import WEBHOOK_CONFIG, DEFAULT_TARGET_URL
+from src.config import WEBHOOK_CONFIG, DEFAULT_TARGET_URL, SKIP_TIMEOUT_CHECK, TIMEOUT_SECONDS
 from src.services.message import send_formatted_message
 
 
@@ -93,14 +93,24 @@ def check_long_running_builds(running_builds, running_builds_lock):
                         elapsed_time = (current_time - build_info['start_time']).total_seconds()
                         app_logger.info(f"⏱️  已运行时间: {elapsed_time} 秒")
                         
-                        if elapsed_time > 300:  # 测试时改为10秒，方便快速验证
-                            # 发送超时告警
-                            app_logger.warning(f"🚨 构建超时，发送告警: {pipeline_iid}")
-                            # 从构建信息中获取route_name
-                            build_route_name = build_info.get('route_name', '')
-                            send_long_build_alert(build_info, build_route_name)
-                            # 标记为需要移除
-                            builds_to_remove.append(pipeline_iid)
+                        # 检查项目是否在跳过超时检查列表中
+                        if build_info['project_name'] in SKIP_TIMEOUT_CHECK:
+                            # 跳过超时检查
+                            app_logger.info(f"⏱️  项目 {build_info['project_name']} 在跳过超时检查列表中，跳过本次检查")
+                        else:
+                            # 获取项目的自定义超时时间，如果没有配置则使用默认值300秒
+                            timeout_seconds = TIMEOUT_SECONDS.get(build_info['project_name'], 300)
+                            
+                            if elapsed_time > timeout_seconds:
+                                # 发送超时告警
+                                app_logger.warning(f"🚨 构建超时，发送告警: {pipeline_iid}")
+                                # 从构建信息中获取route_name
+                                build_route_name = build_info.get('route_name', '')
+                                send_long_build_alert(build_info, build_route_name)
+                                # 标记为需要移除
+                                builds_to_remove.append(pipeline_iid)
+                            else:
+                                app_logger.info(f"⏱️  构建 {pipeline_iid} 已运行 {elapsed_time} 秒，未超过配置的超时时间 {timeout_seconds} 秒")
             
             # 移除已经处理超时告警的构建
             with running_builds_lock:

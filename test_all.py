@@ -46,7 +46,7 @@ def run_test(test_name, test_func):
 # --------------------------
 def test_config_loading():
     """测试配置加载功能"""
-    from src.config import WEBHOOK_CONFIG, DEFAULT_TARGET_URL, MINIO_CONFIG
+    from src.config import WEBHOOK_CONFIG, DEFAULT_TARGET_URL, MINIO_CONFIG, SKIP_TIMEOUT_CHECK, TIMEOUT_SECONDS
     from src.config.loader import load_config
     
     # 测试配置是否成功加载
@@ -56,12 +56,18 @@ def test_config_loading():
     assert isinstance(DEFAULT_TARGET_URL, str)
     assert MINIO_CONFIG is not None
     assert isinstance(MINIO_CONFIG, dict)
+    assert SKIP_TIMEOUT_CHECK is not None
+    assert isinstance(SKIP_TIMEOUT_CHECK, list)
+    assert TIMEOUT_SECONDS is not None
+    assert isinstance(TIMEOUT_SECONDS, dict)
     
     # 测试load_config函数
-    config1, config2, config3 = load_config()
+    config1, config2, config3, config4, config5 = load_config()
     assert isinstance(config1, dict)
     assert isinstance(config2, str)
     assert isinstance(config3, dict)
+    assert isinstance(config4, list)
+    assert isinstance(config5, dict)
 
 # --------------------------
 # 2. 测试工具函数
