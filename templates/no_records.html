@@ -1,0 +1,105 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>无记录 - 流水线管理系统</title>
+    <link rel="icon" type="image/x-icon" href="{{ url_for('static', filename='favicon.ico') }}">
+    <link rel="stylesheet" href="/static/styles.css">
+</head>
+<body>
+    <div class="no-records-container">
+        <div style="padding: 24px 32px; background: linear-gradient(135deg, var(--btn-bg), var(--btn-hover)); display: flex; justify-content: space-between; align-items: center;">
+            <h1 style="margin: 0; padding: 0; background: none; font-size: 24px; font-weight: 600;">流水线管理系统</h1>
+            <a href="/pipelines/records/view" class="page-nav-btn" style="background-color: rgba(255,255,255,0.2); color: white; border: 1px solid rgba(255,255,255,0.3);">返回首页</a>
+        </div>
+        
+        <div class="no-records-content">
+            <div class="no-records-icon">📋</div>
+            <h2>无记录</h2>
+            <p>抱歉，您访问的命名空间 <strong>{{ namespace }}</strong> 不存在或没有相关记录。</p>
+            <div class="no-records-actions">
+                <button class="action-btn" onclick="window.history.back()">返回上一页</button>
+                <a href="/pipelines/records/view" class="action-btn">查看所有记录</a>
+                <a href="/cd-records" class="action-btn">查看CD记录</a>
+            </div>
+        </div>
+    </div>
+    
+    <style>
+        .no-records-container {
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+            background-color: var(--bg-color);
+            color: var(--text-color);
+        }
+        
+        .no-records-content {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            padding: 40px;
+            text-align: center;
+        }
+        
+        .no-records-icon {
+            font-size: 80px;
+            margin-bottom: 24px;
+        }
+        
+        .no-records-content h2 {
+            font-size: 32px;
+            margin-bottom: 16px;
+            color: var(--text-color);
+        }
+        
+        .no-records-content p {
+            font-size: 18px;
+            margin-bottom: 32px;
+            color: var(--secondary-text);
+            max-width: 600px;
+        }
+        
+        .no-records-actions {
+            display: flex;
+            gap: 16px;
+            flex-wrap: wrap;
+            justify-content: center;
+        }
+        
+        .action-btn {
+            padding: 12px 24px;
+            border: none;
+            border-radius: 4px;
+            background-color: var(--btn-bg);
+            color: white;
+            font-size: 16px;
+            font-weight: 500;
+            cursor: pointer;
+            text-decoration: none;
+            display: inline-flex;
+            align-items: center;
+            transition: background-color 0.3s ease;
+        }
+        
+        .action-btn:hover {
+            background-color: var(--btn-hover);
+        }
+        
+        @media (max-width: 768px) {
+            .no-records-actions {
+                flex-direction: column;
+                align-items: center;
+            }
+            
+            .action-btn {
+                width: 200px;
+                justify-content: center;
+            }
+        }
+    </style>
+</body>
+</html>

@@ -27,7 +27,10 @@
                 </div>
                 <div class="filter-item">
                     <label for="branch-filter">分支:</label>
-                    <select id="branch-filter"></select>
+                    <div class="select-wrapper">
+                        <select id="branch-filter" disabled></select>
+                        <div class="loading-overlay" id="branch-loading">加载中...</div>
+                    </div>
                 </div>
                 <div class="filter-item">
                     <label for="status-filter">状态:</label>
@@ -108,8 +111,40 @@
                 toggleBtn.textContent = savedTheme === 'dark' ? '切换到浅色模式' : '切换到深色模式';
             }
             
+            // 为项目名称筛选项添加change事件监听器
+            const projectFilter = document.getElementById('project-filter');
+            if (projectFilter) {
+                projectFilter.addEventListener('change', function() {
+                    applyFilters();
+                });
+            }
+            
             fetchRecords();
         });
+        
+        // 显示分支加载状态
+        function showBranchLoading() {
+            const loadingOverlay = document.getElementById('branch-loading');
+            const branchFilter = document.getElementById('branch-filter');
+            if (loadingOverlay) {
+                loadingOverlay.classList.add('show');
+            }
+            if (branchFilter) {
+                branchFilter.disabled = true;
+            }
+        }
+        
+        // 隐藏分支加载状态
+        function hideBranchLoading() {
+            const loadingOverlay = document.getElementById('branch-loading');
+            const branchFilter = document.getElementById('branch-filter');
+            if (loadingOverlay) {
+                loadingOverlay.classList.remove('show');
+            }
+            if (branchFilter) {
+                branchFilter.disabled = false;
+            }
+        }
         
         // 从API获取记录
         async function fetchRecords() {
@@ -132,6 +167,9 @@
                 if (subpath) {
                     apiUrl += `?subpath=${encodeURIComponent(subpath)}`;
                 }
+                
+                // 显示分支加载状态
+                showBranchLoading();
                 
                 const response = await fetch(apiUrl, {
                     method: 'GET',
@@ -163,14 +201,14 @@
                 // 初始化时按时间从晚到早排序
                 sortByTimeDesc();
                 
-                // 更新下拉选项
-                updateFilterOptions();
-                
                 // 调用筛选函数，渲染表格
                 applyFilters();
             } catch (error) {
                 // 显示友好的错误信息
                 alert('获取CD记录失败，请刷新页面重试。');
+            } finally {
+                // 隐藏分支加载状态
+                hideBranchLoading();
             }
         }
         
@@ -185,16 +223,23 @@
         }
         
         // 更新筛选选项
-        function updateFilterOptions() {
-            // 获取所有唯一的项目名称
+        function updateFilterOptions(recordsToUse = filteredRecords) {
+            // 获取所有唯一的项目名称（基于所有记录）
             const projectNames = [...new Set(allRecords.map(record => record.project_name))].filter(name => name);
             
-            // 获取所有唯一的分支
-            const branches = [...new Set(allRecords.map(record => record.ref))].filter(branch => branch);
+            // 获取所有唯一的分支（基于当前筛选后的记录）
+            const branches = [...new Set(recordsToUse.map(record => record.ref))].filter(branch => branch);
+            
+            // 对项目名称和分支按字母顺序排序
+            projectNames.sort((a, b) => a.localeCompare(b));
+            branches.sort((a, b) => a.localeCompare(b));
             
             // 更新项目名称下拉选项
             const projectSelect = document.getElementById('project-filter');
             if (projectSelect) {
+                // 保存当前选中的值
+                const currentValue = projectSelect.value;
+                
                 // 清空现有选项，保留默认选项
                 projectSelect.innerHTML = '<option value="">全部项目</option>';
                 // 添加项目名称选项
@@ -204,11 +249,17 @@
                     option.textContent = name;
                     projectSelect.appendChild(option);
                 });
+                
+                // 恢复当前选中的值
+                projectSelect.value = currentValue;
             }
             
             // 更新分支下拉选项
             const branchSelect = document.getElementById('branch-filter');
             if (branchSelect) {
+                // 保存当前选中的值
+                const currentValue = branchSelect.value;
+                
                 // 清空现有选项，保留默认选项
                 branchSelect.innerHTML = '<option value="">全部分支</option>';
                 // 添加分支选项
@@ -218,6 +269,9 @@
                     option.textContent = branch;
                     branchSelect.appendChild(option);
                 });
+                
+                // 恢复当前选中的值
+                branchSelect.value = currentValue;
             }
         }
         
@@ -227,6 +281,9 @@
             const branchFilter = document.getElementById('branch-filter').value;
             const statusFilter = document.getElementById('status-filter').value;
             const searchFilter = document.getElementById('search-filter').value.toLowerCase();
+            
+            // 显示分支加载状态
+            showBranchLoading();
             
             filteredRecords = allRecords.filter(record => {
                 // 确保record是对象
@@ -276,6 +333,12 @@
             
             // 调用排序函数
             sortTable(currentSortColumn, currentSortDirection);
+            
+            // 更新筛选选项，基于当前可见的记录
+            updateFilterOptions(filteredRecords);
+            
+            // 隐藏分支加载状态
+            hideBranchLoading();
         }
         
         // 排序表格
@@ -475,7 +538,21 @@
             document.getElementById('branch-filter').value = '';
             document.getElementById('status-filter').value = '';
             document.getElementById('search-filter').value = '';
-            applyFilters();
+            
+            // 显示分支加载状态
+            showBranchLoading();
+            
+            // 重置为显示所有记录
+            filteredRecords = [...allRecords];
+            
+            // 调用排序函数
+            sortTable(currentSortColumn, currentSortDirection);
+            
+            // 更新筛选选项，基于所有记录
+            updateFilterOptions(allRecords);
+            
+            // 隐藏分支加载状态
+            hideBranchLoading();
         }
         
         // 渲染分页
@@ -525,5 +602,43 @@
             pagination.appendChild(nextBtn);
         }
     </script>
+    
+    <style>
+        .select-wrapper {
+            position: relative;
+            display: inline-block;
+            width: 100%;
+        }
+        
+        .loading-overlay {
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background-color: rgba(255, 255, 255, 0.8);
+            color: var(--text-color);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            border-radius: 4px;
+            font-size: 14px;
+            z-index: 10;
+            opacity: 0;
+            visibility: hidden;
+            transition: opacity 0.3s ease, visibility 0.3s ease;
+        }
+        
+        .loading-overlay.show {
+            opacity: 1;
+            visibility: visible;
+        }
+        
+        /* 深色模式适配 */
+        [data-theme="dark"] .loading-overlay {
+            background-color: rgba(30, 41, 59, 0.8);
+            color: var(--text-color);
+        }
+    </style>
 </body>
 </html>

@@ -295,33 +295,12 @@ def register_routes(app):
                 record for record in records_list 
                 if (namespace in (record.get('subpath') or '') or namespace in (record.get('namespace') or ''))
             ]
-        # 如果没有记录，尝试从project.json加载
-        if not records_list:
-            import os
-            import json
-            project_json_path = 'project.json'
-            if os.path.exists(project_json_path):
-                try:
-                    with open(project_json_path, 'r', encoding='utf-8') as f:
-                        project_data = json.load(f)
-                        records_list = list(project_data.values())
-                        app_logger.info(f"从project.json加载了 {len(records_list)} 条记录")
-                except Exception as e:
-                        app_logger.error(f"读取project.json失败: {str(e)}")
-            else:
-                # project.json不存在时使用默认示例记录
-                records_list = [
-                    {
-                        'namespace': 'default',
-                        'project_name': '示例项目',
-                        'pipeline_path': '#',
-                        'path_with_namespace': 'default/example-project',
-                        'git_url': 'http://example.com/default/example-project',
-                        'pipeline_iid': 'N/A',
-                        'subpath': None
-                    }
-                ]
-                app_logger.info("添加了默认示例记录")
+            
+            # 如果没有找到匹配的记录，显示无记录提示
+            if not records_list:
+                app_logger.info(f"未找到命名空间 {namespace} 的记录")
+                # 返回无记录提示页面
+                return render_template('no_records.html', namespace=namespace)
         
         # 排序：先按record_time降序，无record_time的按project_name升序
         def get_sort_key(x):
