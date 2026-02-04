@@ -9,37 +9,53 @@
 </head>
 <body>
     <div class="container">
-        <h1>项目清单</h1>
+        <!-- 页面头部 -->
+        <header class="page-header">
+            <h1>📋 项目清单</h1>
+            <div class="header-actions">
+                <button class="page-nav-btn" onclick="goToCDRecords()">
+                    <span>📊</span> 查看CD记录
+                </button>
+                <button class="page-nav-btn" onclick="toggleTheme()" id="themeToggleBtn">
+                    <span id="themeIcon">🌙</span> <span id="themeText">深色模式</span>
+                </button>
+            </div>
+        </header>
+
+        <!-- 说明框 -->
         <div class="note">
-            <strong>说明：</strong>Git CICD 项目清单。
+            <strong>💡 说明：</strong>Git CICD 项目清单。点击卡片上的按钮可以进入项目、查看构建入口或查看最近push记录。
         </div>
+
         <!-- 控制面板 -->
         <div class="control-panel">
             <!-- 左侧控制 -->
             <div class="control-left">
-                <button class="refresh-btn" onclick="location.reload()">刷新记录</button>
-                <button class="page-nav-btn" onclick="goToCDRecords()">查看CD记录</button>
+                <button class="refresh-btn" onclick="refreshPage()">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <polyline points="23 4 23 10 17 10"></polyline>
+                        <path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"></path>
+                    </svg>
+                    刷新记录
+                </button>
             </div>
-            
+
             <!-- 右侧控制 -->
             <div class="control-right">
                 <!-- 布局切换 -->
-        <div class="layout-toggle">
-            <span class="layout-label">布局:</span>
-            <button class="layout-btn" onclick="setLayout(1)">1列</button>
-            <button class="layout-btn" onclick="setLayout(2)">2列</button>
-            <button class="layout-btn active" onclick="setLayout(3)">3列</button>
-        </div>
-                
-                <!-- 主题切换 -->
-                <button class="theme-toggle" onclick="toggleTheme()">切换到深色模式</button>
+                <div class="layout-toggle">
+                    <span class="layout-label">布局:</span>
+                    <button class="layout-btn" onclick="setLayout(1)" data-cols="1">1列</button>
+                    <button class="layout-btn" onclick="setLayout(2)" data-cols="2">2列</button>
+                    <button class="layout-btn active" onclick="setLayout(3)" data-cols="3">3列</button>
+                </div>
             </div>
         </div>
-        
+
         <!-- 搜索和筛选框 -->
         <div class="filter-container">
             <select id="projectFilter" class="filter-input">
-                <option value="">所有项目</option>
+                <option value="">📁 所有项目</option>
                 {% set unique_projects = records|map(attribute='project_name')|unique|sort %}
                 {% for project in unique_projects %}
                     {% if project %}
@@ -47,17 +63,28 @@
                     {% endif %}
                 {% endfor %}
             </select>
-            <input type="text" id="searchInput" class="filter-input" placeholder="搜索...">
-            <button class="filter-btn" onclick="filterRecords()">筛选</button>
-            <button class="filter-btn" onclick="clearFilters()">清除筛选</button>
+            <input type="text" id="searchInput" class="filter-input" placeholder="🔍 搜索项目名称、分支、命名空间...">
+            <button class="filter-btn" onclick="filterRecords()">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="vertical-align: middle; margin-right: 4px;">
+                    <polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3"></polygon>
+                </svg>
+                筛选
+            </button>
+            <button class="filter-btn secondary" onclick="clearFilters()">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="vertical-align: middle; margin-right: 4px;">
+                    <line x1="18" y1="6" x2="6" y2="18"></line>
+                    <line x1="6" y1="6" x2="18" y2="18"></line>
+                </svg>
+                清除
+            </button>
         </div>
-        
+
         <!-- 卡片容器 - 三列布局 -->
-        <div class="cards-container">
+        <div class="cards-container" id="cardsContainer">
             {% for record in records %}
                 {% set is_default = record.namespace == 'default' and record.project_name == '示例项目' %}
                 {% set card_class = 'record-card default-record' if is_default else 'record-card' %}
-                <div class="{{ card_class }}">
+                <div class="{{ card_class }}" data-project="{{ record.project_name or '' }}">
                     <div class="card-content">
                         <div class="record-title">
                             {{ record.project_name or 'N/A' }}
@@ -65,7 +92,7 @@
                                 {% if record.branch %}
                                     <span class="tag branch-tag">{{ record.branch | replace('refs/heads/', '') }}</span>
                                 {% endif %}
-                                <span class="tag pipeline-iid-tag">{{ record.pipeline_iid or 'N/A' }}</span>
+                                <span class="tag pipeline-iid-tag">#{{ record.pipeline_iid or 'N/A' }}</span>
                                 {% if record.latest_triggered_by %}
                                     <span class="tag user-tag">{{ record.latest_triggered_by }}</span>
                                 {% endif %}
@@ -82,113 +109,163 @@
                         {% if record.subpath == 'PD3' or record.subpath == 'edge' %}
                             <div class="record-field">
                                 <span class="field-label">应用变量:</span>
-                                <span class="field-value">DEPLOYER == test</span>
+                                <span class="field-value"><code>DEPLOYER == test</code></span>
                             </div>
                         {% elif record.subpath == 'PD4' %}
                             <div class="record-field">
                                 <span class="field-label">应用变量:</span>
-                                <span class="field-value">MANUAL_PAR == test</span>
+                                <span class="field-value"><code>MANUAL_PAR == test</code></span>
                             </div>
                         {% endif %}
                     </div>
                     <div class="card-actions">
-                        <a href="{{ record.git_url or '#' }}" target="_blank" class="card-btn git-btn">进入项目</a>
-                        <a href="{{ record.pipeline_path or '#' }}" target="_blank" class="card-btn build-btn" onclick="copyDeployerToClipboard(event, this)" data-subpath="{{ record.subpath or '' }}">点我进入构建入口 <span title="点击复制应用变量并跳转构建入口" style="margin-left: 8px; background-color: #93c5fd; color: #0f172a; width: 20px; height: 20px; border-radius: 50%; display: inline-flex; align-items: center; justify-content: center; font-weight: bold; font-size: 14px;">!</span></a>
-                        <button class="card-btn info-btn" onclick="viewLatestPushRecord('{{ record.git_url }}')">查看最近push记录</button>
+                        <a href="{{ record.git_url or '#' }}" target="_blank" class="card-btn git-btn">
+                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="vertical-align: middle; margin-right: 4px;">
+                                <path d="M9 19c-5 1.5-5-2.5-7-3m14 6v-3.87a3.37 3.37 0 0 0-.94-2.61c3.14-.35 6.44-1.54 6.44-7A5.44 5.44 0 0 0 20 4.77 5.07 5.07 0 0 0 19.91 1S18.73.65 16 2.48a13.38 13.38 0 0 0-7 0C6.27.65 5.09 1 5.09 1A5.07 5.07 0 0 0 5 4.77a5.44 5.44 0 0 0-1.5 3.78c0 5.42 3.3 6.61 6.44 7A3.37 3.37 0 0 0 9 18.13V22"></path>
+                            </svg>
+                            进入项目
+                        </a>
+                        <a href="{{ record.pipeline_path or '#' }}" target="_blank" class="card-btn build-btn" onclick="copyDeployerToClipboard(event, this)" data-subpath="{{ record.subpath or '' }}">
+                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="vertical-align: middle; margin-right: 4px;">
+                                <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"></polygon>
+                            </svg>
+                            构建入口
+                            <span title="点击复制应用变量并跳转构建入口" style="margin-left: 4px; background-color: rgba(255,255,255,0.3); color: inherit; width: 18px; height: 18px; border-radius: 50%; display: inline-flex; align-items: center; justify-content: center; font-weight: bold; font-size: 12px;">!</span>
+                        </a>
+                        <button class="card-btn info-btn" onclick="viewLatestPushRecord('{{ record.git_url }}')">
+                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="vertical-align: middle; margin-right: 4px;">
+                                <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
+                                <polyline points="14 2 14 8 20 8"></polyline>
+                                <line x1="16" y1="13" x2="8" y2="13"></line>
+                                <line x1="16" y1="17" x2="8" y2="17"></line>
+                                <polyline points="10 9 9 9 8 9"></polyline>
+                            </svg>
+                            Push记录
+                        </button>
                     </div>
                 </div>
             {% endfor %}
         </div>
-        
+
         <!-- 模态弹窗 -->
         <div id="pushRecordModal" class="modal">
             <div class="modal-content">
-                <span class="close" onclick="closePushRecordModal()">&times;</span>
-                <h2>commit-item</h2>
+                <div class="modal-header">
+                    <h2>📋 Commit 记录</h2>
+                    <button class="close" onclick="closePushRecordModal()">&times;</button>
+                </div>
                 <!-- 分支筛选下拉菜单 -->
-                <div class="filter-container" style="margin-bottom: 20px;">
-                    <label for="refFilter" style="color: var(--label-color); font-weight: bold;">选择分支: </label>
-                    <select id="refFilter" onchange="filterRecordsByRef()" class="filter-input">
+                <div class="filter-container" style="margin-bottom: 20px; padding: 12px;">
+                    <label for="refFilter" style="color: var(--label-color); font-weight: 500; font-size: 14px;">选择分支: </label>
+                    <select id="refFilter" onchange="filterRecordsByRef()" class="filter-input" style="min-width: 200px;">
                         <option value="all">所有分支</option>
                     </select>
                 </div>
                 <div id="pushRecordContent">
                     <!-- 动态内容将在此处显示 -->
+                    <div class="loading">加载中...</div>
                 </div>
             </div>
         </div>
-        </div>
     </div>
-    
+
     <script>
         // 主题切换功能
         function toggleTheme() {
             const currentTheme = document.documentElement.getAttribute('data-theme');
             const newTheme = currentTheme === 'dark' ? 'light' : 'dark';
-            
+
             document.documentElement.setAttribute('data-theme', newTheme);
             localStorage.setItem('theme', newTheme);
-            
-            // 更新按钮文本
-            const toggleBtn = document.querySelector('.theme-toggle');
-            toggleBtn.textContent = newTheme === 'dark' ? '切换到浅色模式' : '切换到深色模式';
+
+            // 更新按钮文本和图标
+            const themeIcon = document.getElementById('themeIcon');
+            const themeText = document.getElementById('themeText');
+
+            if (newTheme === 'dark') {
+                themeIcon.textContent = '☀️';
+                themeText.textContent = '浅色模式';
+            } else {
+                themeIcon.textContent = '🌙';
+                themeText.textContent = '深色模式';
+            }
         }
-        
+
         // 布局切换功能
         function setLayout(cols) {
-            const cardsContainer = document.querySelector('.cards-container');
+            const cardsContainer = document.getElementById('cardsContainer');
             const layoutBtns = document.querySelectorAll('.layout-btn');
-            
+
             // 设置网格列数
-            cardsContainer.style.gridTemplateColumns = `repeat(auto-fill, minmax(${350 * (3 / cols)}px, 1fr))`;
-            
+            const minWidth = cols === 1 ? 300 : (cols === 2 ? 280 : 320);
+            cardsContainer.style.gridTemplateColumns = `repeat(${cols}, minmax(${minWidth}px, 1fr))`;
+
             // 更新按钮状态
-            layoutBtns.forEach(btn => btn.classList.remove('active'));
-            event.target.classList.add('active');
-            
+            layoutBtns.forEach(btn => {
+                btn.classList.remove('active');
+                if (parseInt(btn.dataset.cols) === cols) {
+                    btn.classList.add('active');
+                }
+            });
+
             // 保存布局设置到localStorage
             localStorage.setItem('layout', cols);
         }
-        
+
+        // 刷新页面功能
+        function refreshPage() {
+            const refreshBtn = document.querySelector('.refresh-btn');
+            refreshBtn.classList.add('spinning');
+            refreshBtn.disabled = true;
+
+            // 添加旋转动画
+            const svg = refreshBtn.querySelector('svg');
+            svg.style.animation = 'spin 1s linear infinite';
+
+            setTimeout(() => {
+                location.reload();
+            }, 500);
+        }
+
         // 复制应用变量到剪贴板的函数
         function copyDeployerToClipboard(event, element) {
             // 阻止默认的链接跳转
             event.preventDefault();
-            
+
             // 保存链接地址
             const href = element.href;
-            
+
             // 根据subpath决定要复制的文本
             const subpath = element.dataset.subpath || '';
             let textToCopy = '';
-            
+
             if (subpath === 'PD3' || subpath === 'edge') {
                 textToCopy = 'DEPLOYER';
             } else if (subpath === 'PD4') {
                 textToCopy = 'MANUAL_PAR';
             }
-            
+
             // 如果没有匹配的subpath，不执行复制操作，直接打开链接
             if (!textToCopy) {
                 window.open(href, '_blank');
                 return;
             }
-            
+
             // 尝试使用传统的textarea复制方法
             function fallbackCopyTextToClipboard(text) {
                 const textArea = document.createElement('textarea');
                 textArea.value = text;
-                
+
                 // 避免滚动到页面底部
                 textArea.style.top = '0';
                 textArea.style.left = '0';
                 textArea.style.position = 'fixed';
                 textArea.style.opacity = '0';
-                
+
                 document.body.appendChild(textArea);
                 textArea.focus();
                 textArea.select();
-                
+
                 let successful = false;
                 try {
                     // 执行复制命令
@@ -198,11 +275,11 @@
                 } catch (err) {
                     console.error('Fallback: 无法执行复制命令:', err);
                 }
-                
+
                 document.body.removeChild(textArea);
                 return successful;
             }
-            
+
             // 主复制逻辑
             function performCopy() {
                 try {
@@ -250,33 +327,46 @@
                     window.open(href, '_blank');
                 }
             }
-            
+
             // 执行复制操作
             performCopy();
         }
-        
+
         // 页面加载时初始化
         document.addEventListener('DOMContentLoaded', function() {
             // 初始化主题
             const savedTheme = localStorage.getItem('theme') || 'light';
             document.documentElement.setAttribute('data-theme', savedTheme);
-            
-            const toggleBtn = document.querySelector('.theme-toggle');
-            toggleBtn.textContent = savedTheme === 'dark' ? '切换到浅色模式' : '切换到深色模式';
-            
+
+            const themeIcon = document.getElementById('themeIcon');
+            const themeText = document.getElementById('themeText');
+            if (savedTheme === 'dark') {
+                themeIcon.textContent = '☀️';
+                themeText.textContent = '浅色模式';
+            }
+
             // 初始化布局
             const savedLayout = parseInt(localStorage.getItem('layout')) || 3;
-            const cardsContainer = document.querySelector('.cards-container');
-            const layoutBtns = document.querySelectorAll('.layout-btn');
-            
-            // 设置网格列数
-            cardsContainer.style.gridTemplateColumns = `repeat(auto-fill, minmax(${350 * (3 / savedLayout)}px, 1fr))`;
-            
-            // 更新按钮状态
-            layoutBtns.forEach(btn => btn.classList.remove('active'));
-            layoutBtns[savedLayout - 1].classList.add('active');
+            setLayout(savedLayout);
+
+            // 添加搜索实时筛选
+            document.getElementById('searchInput').addEventListener('input', debounce(filterRecords, 300));
+            document.getElementById('projectFilter').addEventListener('change', filterRecords);
         });
-        
+
+        // 防抖函数
+        function debounce(func, wait) {
+            let timeout;
+            return function executedFunction(...args) {
+                const later = () => {
+                    clearTimeout(timeout);
+                    func(...args);
+                };
+                clearTimeout(timeout);
+                timeout = setTimeout(later, wait);
+            };
+        }
+
         // 跳转到CD记录页面，传递当前URL作为返回地址
         function goToCDRecords() {
             const currentUrl = window.location.pathname;
@@ -289,64 +379,99 @@
             // 跳转到CD记录页面
             window.location.href = `/cd-records${returnUrl}`;
         }
-        
+
         // 筛选记录功能
         function filterRecords() {
-            const searchTerm = document.getElementById('searchInput').value.toLowerCase();
+            const searchTerm = document.getElementById('searchInput').value.toLowerCase().trim();
             const projectFilter = document.getElementById('projectFilter').value;
             const recordCards = document.querySelectorAll('.record-card');
-            
+            let visibleCount = 0;
+
             recordCards.forEach(card => {
                 const cardText = card.textContent.toLowerCase();
                 // 获取完整的项目名称，不包含pipeline_iid
                 const recordTitle = card.querySelector('.record-title');
                 // 克隆元素并移除tag，以获取纯项目名称
                 const titleClone = recordTitle.cloneNode(true);
-                const tag = titleClone.querySelector('.tag');
-                if (tag) {
-                    tag.remove();
-                }
+                const tags = titleClone.querySelectorAll('.tag');
+                tags.forEach(tag => tag.remove());
                 const projectName = titleClone.textContent.trim().toLowerCase();
-                
+
                 const matchesSearch = searchTerm === '' || cardText.includes(searchTerm);
                 const matchesProject = projectFilter === '' || projectName === projectFilter.toLowerCase();
-                
+
                 if (matchesSearch && matchesProject) {
-                    card.style.display = 'block';
+                    card.style.display = 'flex';
+                    card.style.animation = 'slideUp 0.3s ease-out backwards';
+                    visibleCount++;
                 } else {
                     card.style.display = 'none';
                 }
             });
+
+            // 显示筛选结果数量
+            showFilterResult(visibleCount, recordCards.length);
         }
-        
+
+        // 显示筛选结果
+        function showFilterResult(visible, total) {
+            // 移除已有的提示
+            const existingToast = document.querySelector('.filter-toast');
+            if (existingToast) {
+                existingToast.remove();
+            }
+
+            if (visible < total) {
+                const toast = document.createElement('div');
+                toast.className = 'filter-toast';
+                toast.style.cssText = `
+                    position: fixed;
+                    bottom: 20px;
+                    right: 20px;
+                    background: var(--primary-500);
+                    color: white;
+                    padding: 12px 20px;
+                    border-radius: 8px;
+                    box-shadow: var(--shadow-lg);
+                    z-index: 1000;
+                    animation: slideUp 0.3s ease-out;
+                    font-size: 14px;
+                `;
+                toast.textContent = `显示 ${visible} / ${total} 条记录`;
+                document.body.appendChild(toast);
+
+                setTimeout(() => {
+                    toast.style.opacity = '0';
+                    toast.style.transition = 'opacity 0.3s';
+                    setTimeout(() => toast.remove(), 300);
+                }, 2000);
+            }
+        }
+
         // 清除筛选功能
         function clearFilters() {
             document.getElementById('searchInput').value = '';
             document.getElementById('projectFilter').value = '';
             filterRecords();
         }
-        
-        // 监听输入事件，实时筛选
-        document.getElementById('searchInput').addEventListener('input', filterRecords);
-        document.getElementById('projectFilter').addEventListener('change', filterRecords);
-        
+
         // 全局变量，用于存储原始记录数据
         let originalPushRecords = [];
         let currentGitUrl = '';
-        
+
         // 查看最近push记录
         function viewLatestPushRecord(gitUrl) {
             const modal = document.getElementById('pushRecordModal');
             const content = document.getElementById('pushRecordContent');
             const refFilter = document.getElementById('refFilter');
-            
+
             // 保存当前gitUrl
             currentGitUrl = gitUrl;
-            
+
             // 显示加载状态
             content.innerHTML = '<div class="loading">加载中...</div>';
-            modal.style.display = 'block';
-            
+            modal.classList.add('show');
+
             // 发送API请求获取最近push记录
             fetch(`/push_records/latest/${encodeURIComponent(gitUrl)}`)
                 .then(response => response.json())
@@ -360,11 +485,11 @@
                             const timeB = new Date(b.record_time || 0);
                             return timeB - timeA;
                         });
-                        
+
                         // 收集所有唯一分支
                         const refs = ['all'];
                         const refSet = new Set();
-                        
+
                         originalPushRecords.forEach(record => {
                             if (record.ref) {
                                 // 提取分支名称，去除refs/heads/前缀
@@ -375,16 +500,16 @@
                                 }
                             }
                         });
-                        
+
                         // 更新分支筛选下拉菜单
                         refFilter.innerHTML = '';
                         refs.forEach(ref => {
                             const option = document.createElement('option');
                             option.value = ref === 'all' ? 'all' : `refs/heads/${ref}`;
-                            option.textContent = ref;
+                            option.textContent = ref === 'all' ? '所有分支' : ref;
                             refFilter.appendChild(option);
                         });
-                        
+
                         // 显示所有记录
                         displayRecordsByRef('all');
                     } else {
@@ -396,98 +521,87 @@
                     content.innerHTML = '<div class="error">获取push记录失败，请稍后重试</div>';
                 });
         }
-        
+
         // 根据分支筛选记录并显示
         function filterRecordsByRef() {
             const refFilter = document.getElementById('refFilter');
             const selectedRef = refFilter.value;
             displayRecordsByRef(selectedRef);
         }
-        
+
         // 根据选定的分支显示记录
         function displayRecordsByRef(selectedRef) {
             const content = document.getElementById('pushRecordContent');
             let records = originalPushRecords;
-            
+
             // 筛选指定分支的记录
             if (selectedRef !== 'all') {
                 records = records.filter(record => record.ref === selectedRef);
             }
-            
+
             // 只显示最近的10条记录
             const displayRecords = records.slice(0, 10);
-            
+
             if (displayRecords.length > 0) {
                 let html = '<div class="push-records-container">';
-                
+
                 // 遍历筛选后的记录
                 displayRecords.forEach((record, index) => {
-                    // 检查是否有pipeline_iid
-                    let hasPipelineId = false;
-                    let pipelineIds = [];
-                    if (record.commits && record.commits.length > 0) {
-                        for (const commit of record.commits) {
-                            if (commit.pipeline_iid) {
-                                hasPipelineId = true;
-                                pipelineIds.push(commit.pipeline_iid);
-                            }
-                        }
-                    }
-                    
                     // 提取分支名称，去除refs/heads/前缀
                     const branch = record.ref ? record.ref.replace('refs/heads/', '') : 'N/A';
-                    
+
                     html += `
-                        <div class="push-record-item" data-ref="${record.ref || 'N/A'}">
+                        <div class="push-record-item" data-ref="${record.ref || 'N/A'}" style="animation: slideUp 0.3s ease-out ${index * 0.05}s backwards;">
                             <div class="push-record-header">
-                                <h4>${branch}</h4>
+                                <h4>🌿 ${branch}</h4>
                                 <div class="pipeline-tags">
-                                    ${record.user_name ? `<span class="tag user-tag">${record.user_name}</span>` : ''}
+                                    ${record.user_name ? `<span class="tag user-tag">👤 ${record.user_name}</span>` : ''}
                                 </div>
                             </div>
                             <div class="push-record-detail">
                     `;
-                    
+
                     // 处理提交记录
                     if (record.commits && record.commits.length > 0) {
                         // 直接显示第一条提交记录，不包裹在上层容器内
                         const firstCommit = record.commits[0];
                         html += `
                             <div class="commit-item" id="commit-${index}-0">
-                                <div class="commit-message">${firstCommit.message || '无提交信息'}</div>
+                                <div class="commit-message">${escapeHtml(firstCommit.message || '无提交信息')}</div>
                                 <div class="commit-meta">
-                                    <span class="commit-time">${firstCommit.timestamp || 'N/A'}</span>
-                                    ${firstCommit.pipeline_iid ? `<span class="pipeline-id">流水线ID: ${firstCommit.pipeline_iid}</span>` : ''}
-                                    <a href="${firstCommit.url || '#'}" target="_blank" class="commit-url">查看详情</a>
+                                    <span class="commit-time">🕐 ${firstCommit.timestamp || 'N/A'}</span>
+                                    ${firstCommit.pipeline_iid ? `<span class="pipeline-id">🚀 流水线 #${firstCommit.pipeline_iid}</span>` : ''}
+                                    <a href="${firstCommit.url || '#'}" target="_blank" class="commit-url">查看详情 →</a>
                                 </div>
                             </div>
                         `;
-                        
+
                         // 如果提交记录大于1，添加下拉控制
                         if (record.commits.length > 1) {
                             html += `
                                 <div class="more-commits-container">
-                                    <button class="toggle-commits-btn" onclick="toggleCommits(${index})"><span id="toggle-text-${index}">查看更多提交 (${record.commits.length - 1})</span>
+                                    <button class="toggle-commits-btn" onclick="toggleCommits(${index})">
+                                        <span id="toggle-text-${index}">查看更多提交 (${record.commits.length - 1})</span>
                                         <span id="toggle-icon-${index}">▼</span>
                                     </button>
                                     <div class="more-commits" id="more-commits-${index}" style="display: none;">
                             `;
-                            
+
                             // 显示剩余的提交记录
                             for (let i = 1; i < record.commits.length; i++) {
                                 const commit = record.commits[i];
                                 html += `
                                     <div class="commit-item" id="commit-${index}-${i}">
-                                        <div class="commit-message">${commit.message || '无提交信息'}</div>
+                                        <div class="commit-message">${escapeHtml(commit.message || '无提交信息')}</div>
                                         <div class="commit-meta">
-                                            <span class="commit-time">${commit.timestamp || 'N/A'}</span>
-                                            ${commit.pipeline_iid ? `<span class="pipeline-id">流水线ID: ${commit.pipeline_iid}</span>` : ''}
-                                            <a href="${commit.url || '#'}" target="_blank" class="commit-url">查看详情</a>
+                                            <span class="commit-time">🕐 ${commit.timestamp || 'N/A'}</span>
+                                            ${commit.pipeline_iid ? `<span class="pipeline-id">🚀 流水线 #${commit.pipeline_iid}</span>` : ''}
+                                            <a href="${commit.url || '#'}" target="_blank" class="commit-url">查看详情 →</a>
                                         </div>
                                     </div>
                                 `;
                             }
-                            
+
                             html += `
                                     </div>
                                 </div>
@@ -496,25 +610,33 @@
                     } else {
                         html += '<div class="no-commits">无提交记录</div>';
                     }
-                    
+
                     html += '</div></div>';
                 });
-                
+
                 html += '</div>';
                 content.innerHTML = html;
             } else {
                 content.innerHTML = '<div class="no-record">未找到对应分支的push记录</div>';
             }
         }
-        
+
+        // HTML转义函数
+        function escapeHtml(text) {
+            const div = document.createElement('div');
+            div.textContent = text;
+            return div.innerHTML;
+        }
+
         // 切换提交记录显示
         function toggleCommits(index) {
             const moreCommits = document.getElementById(`more-commits-${index}`);
             const toggleText = document.getElementById(`toggle-text-${index}`);
             const toggleIcon = document.getElementById(`toggle-icon-${index}`);
-            
+
             if (moreCommits.style.display === 'none') {
                 moreCommits.style.display = 'block';
+                moreCommits.style.animation = 'slideDown 0.3s ease-out';
                 toggleText.textContent = '收起提交';
                 toggleIcon.textContent = '▲';
             } else {
@@ -523,20 +645,27 @@
                 toggleIcon.textContent = '▼';
             }
         }
-        
+
         // 关闭push记录模态框
         function closePushRecordModal() {
             const modal = document.getElementById('pushRecordModal');
-            modal.style.display = 'none';
+            modal.classList.remove('show');
         }
-        
+
         // 点击模态框外部关闭
         window.onclick = function(event) {
             const modal = document.getElementById('pushRecordModal');
             if (event.target == modal) {
-                modal.style.display = 'none';
+                closePushRecordModal();
             }
         }
+
+        // ESC键关闭模态框
+        document.addEventListener('keydown', function(event) {
+            if (event.key === 'Escape') {
+                closePushRecordModal();
+            }
+        });
     </script>
 </body>
 </html>

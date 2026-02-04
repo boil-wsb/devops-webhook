@@ -87,16 +87,16 @@ def check_long_running_builds(running_builds, running_builds_lock):
                 # 只有当运行中构建数量大于0时，才打印日志
                 if build_count > 0:
                     # 打印当前running_builds的内容，用于调试
-                    app_logger.info(f"📊 当前运行中构建数量: {build_count}")
+                    app_logger.debug(f"📊 当前运行中构建数量: {build_count}")
                     for pipeline_iid, build_info in running_builds.items():
-                        app_logger.info(f"🔍 检查构建: {pipeline_iid}, 开始时间: {build_info['start_time']}")
+                        app_logger.debug(f"🔍 检查构建: {pipeline_iid}, 开始时间: {build_info['start_time']}")
                         elapsed_time = (current_time - build_info['start_time']).total_seconds()
-                        app_logger.info(f"⏱️  已运行时间: {elapsed_time} 秒")
+                        app_logger.debug(f"⏱️  已运行时间: {elapsed_time} 秒")
                         
                         # 检查项目是否在跳过超时检查列表中
                         if build_info['project_name'] in SKIP_TIMEOUT_CHECK:
                             # 跳过超时检查
-                            app_logger.info(f"⏱️  项目 {build_info['project_name']} 在跳过超时检查列表中，跳过本次检查")
+                            app_logger.debug(f"⏱️  项目 {build_info['project_name']} 在跳过超时检查列表中，跳过本次检查")
                         else:
                             # 获取项目的自定义超时时间，如果没有配置则使用默认值300秒
                             timeout_seconds = TIMEOUT_SECONDS.get(build_info['project_name'], 300)
@@ -110,7 +110,7 @@ def check_long_running_builds(running_builds, running_builds_lock):
                                 # 标记为需要移除
                                 builds_to_remove.append(pipeline_iid)
                             else:
-                                app_logger.info(f"⏱️  构建 {pipeline_iid} 已运行 {elapsed_time} 秒，未超过配置的超时时间 {timeout_seconds} 秒")
+                                app_logger.debug(f"⏱️  构建 {pipeline_iid} 已运行 {elapsed_time} 秒，未超过配置的超时时间 {timeout_seconds} 秒")
             
             # 移除已经处理超时告警的构建
             with running_builds_lock:

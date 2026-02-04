@@ -52,12 +52,12 @@ def register_routes(app):
             json_data = request.get_json()
             
             if json_data is None:
-                return jsonify({'status': 'error', 'message': 'Invalid JSON data'}), 400
+                return jsonify({'status': 'error', 'message': '无效的JSON数据'}), 400
             
             # 获取report_path字段
             report_path = json_data.get('report_path')
             if not report_path:
-                return jsonify({'status': 'error', 'message': 'Missing report_path field'}), 400
+                return jsonify({'status': 'error', 'message': '缺少report_path字段'}), 400
             
             # 初始化MinIO客户端
             minio_client = Minio(
@@ -167,7 +167,7 @@ def register_routes(app):
             # 返回成功响应，包含预签名URL
             response_data = {
                 'status': 'success', 
-                'message': 'File downloaded successfully from MinIO',
+                'message': '文件从MinIO下载成功',
                 'data': {
                     'file_size': os.path.getsize(local_filepath),
                     'presigned_url': presigned_url,
@@ -181,7 +181,7 @@ def register_routes(app):
         except S3Error as e:
             return jsonify({
                 'status': 'error', 
-                'message': f'MinIO error: {str(e)}'
+                'message': f'MinIO错误: {str(e)}'
             }), 500
         except Exception as e:
             return jsonify({
@@ -233,7 +233,7 @@ def register_routes(app):
                 pass
             
             # 返回成功响应
-            return jsonify({'status': 'success', 'message': 'Event received and logged'}), 200
+            return jsonify({'status': 'success', 'message': '事件已接收并记录'}), 200
         except Exception as e:
             # 即使发生错误，也记录异常信息
             try:
@@ -406,7 +406,7 @@ def register_routes(app):
                 return jsonify({
                     'status': 'success',
                     'data': [],
-                    'message': f'No push records found for git_url: {decoded_git_url}'
+                    'message': f'未找到git_url为 {decoded_git_url} 的push记录'
                 }), 200
         except Exception as e:
             return jsonify({

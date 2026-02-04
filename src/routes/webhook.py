@@ -30,7 +30,7 @@ def process_webhook(request, route_name, subpath=None):
     app_logger = logging.getLogger('app_logger')
     
     if not request.is_json:
-        return jsonify({"error": "Invalid JSON"}), 400
+        return jsonify({"error": "无效的JSON格式"}), 400
 
     try:
         # 获取原始请求体并记录到日志
@@ -74,10 +74,10 @@ def process_webhook(request, route_name, subpath=None):
                 monitor_logger.log_event(route_name, request.headers, json.dumps(push_record))
                 
                 # 返回成功响应
-                return jsonify({"message": f"Push event for {route_name} received and processed"}), 200
+                return jsonify({"message": f"已接收并处理 {route_name} 的推送事件"}), 200
             except Exception as e:
                 # 记录详细错误日志
-                error_msg = f"Error processing push event: {str(e)}"
+                error_msg = f"处理推送事件出错: {str(e)}"
                 monitor_logger.log_event(route_name, request.headers, error_msg)
                 # 延迟导入app_logger，避免循环导入问题
                 from logger import app_logger
@@ -122,10 +122,10 @@ def process_webhook(request, route_name, subpath=None):
                         # 根据路由名称获取对应的目标URL
                         target_url = WEBHOOK_CONFIG.get(route_name, DEFAULT_TARGET_URL)
                         if not target_url:
-                            raise Exception(f"No target URL configured for route: {route_name}")
+                            raise Exception(f"路由 {route_name} 未配置目标URL")
                         # 延迟导入app_logger，避免循环导入问题
                         from logger import app_logger
-                        app_logger.info(f"route_name: {route_name}, target_url: {target_url}")
+                        app_logger.info(f"路由名称: {route_name}, 目标URL: {target_url}")
                         send_formatted_message(target_url, message)
                 except Exception as e:
                     # 延迟导入app_logger，避免循环导入问题
@@ -135,19 +135,19 @@ def process_webhook(request, route_name, subpath=None):
                     app_logger.error(traceback.format_exc())
                 
                 # 返回成功响应
-                return jsonify({"message": f"Pipeline event for {route_name} received and processed"}), 200
+                return jsonify({"message": f"已接收并处理 {route_name} 的流水线事件"}), 200
             except KeyError as e:
                 # 处理缺少必要字段的情况
-                error_msg = f"Missing required field: {str(e)}"
+                error_msg = f"缺少必要字段: {str(e)}"
                 monitor_logger.log_event(route_name, request.headers, error_msg)
                 return jsonify({"error": error_msg}), 500
             except Exception as e:
                 # 处理其他异常
-                error_msg = f"Error processing pipeline event: {str(e)}"
+                error_msg = f"处理流水线事件出错: {str(e)}"
                 monitor_logger.log_event(route_name, request.headers, error_msg)
                 return jsonify({"error": error_msg}), 500
     except Exception as e:
         # 记录详细错误日志
-        error_msg = f"Error processing webhook: {str(e)}"
+        error_msg = f"处理webhook出错: {str(e)}"
         monitor_logger.log_event(route_name, request.headers, error_msg)
         return jsonify({"error": error_msg}), 500

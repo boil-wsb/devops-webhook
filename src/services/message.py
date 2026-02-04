@@ -116,7 +116,7 @@ def _find_deploy_ip(commit_url, push_records, push_records_lock, payload, app_lo
         try:
             # 从payload中提取当前的ref
             current_ref = payload.get('object_attributes', {}).get('ref', '')
-            app_logger.info(f"Current ref from payload: {current_ref}")
+            app_logger.info(f"从payload获取的当前ref: {current_ref}")
             
             # 处理current_ref，去除前缀
             processed_current_ref = current_ref
@@ -126,13 +126,13 @@ def _find_deploy_ip(commit_url, push_records, push_records_lock, payload, app_lo
                 processed_current_ref = processed_current_ref.replace('refs/tags/', '')
             elif processed_current_ref.startswith('refs/remotes/'):
                 processed_current_ref = processed_current_ref.replace('refs/remotes/', '')
-            app_logger.info(f"Processed current ref: {processed_current_ref}")
+            app_logger.info(f"处理后的当前ref: {processed_current_ref}")
             
             # 从push_records中查找对应的deploy_ip
             if push_records and push_records_lock:
-                app_logger.info(f"Searching deploy_ip from push_records for commit_url: {commit_url} and ref: {processed_current_ref}")
+                app_logger.info(f"从push_records中搜索deploy_ip，commit_url: {commit_url}，ref: {processed_current_ref}")
                 with push_records_lock:
-                    app_logger.info(f"Current push_records count: {len(push_records)}")
+                    app_logger.info(f"当前push_records数量: {len(push_records)}")
                     found_deploy_ip = False
                     
                     for push_record in push_records:
@@ -156,13 +156,13 @@ def _find_deploy_ip(commit_url, push_records, push_records_lock, payload, app_lo
                             # 然后查找commit_url匹配的记录
                             matching_commit = next((c for c in commits if c.get('url') == commit_url), None)
                             if matching_commit:
-                                app_logger.info(f"Found matching commit with same ref in push_records")
+                                app_logger.info(f"在push_records中找到相同ref的匹配commit")
                                 stages = matching_commit.get('stages', [])
                                 deploy_stage = next((s for s in stages if isinstance(s, dict) and s.get('deploy_ip')), None)
                                 if deploy_stage:
                                     deploy_ip = deploy_stage.get('deploy_ip', '')
                                     if deploy_ip:
-                                        app_logger.info(f"Found deploy_ip from push_records: {deploy_ip}")
+                                        app_logger.info(f"从push_records中找到deploy_ip: {deploy_ip}")
                                         found_deploy_ip = True
                                         break
                             if found_deploy_ip:
@@ -170,14 +170,14 @@ def _find_deploy_ip(commit_url, push_records, push_records_lock, payload, app_lo
             
             # 如果push_records中没有找到，尝试从payload中查找
             if not deploy_ip:
-                app_logger.info(f"No deploy_ip found in push_records, trying payload")
+                app_logger.info(f"在push_records中未找到deploy_ip，尝试从payload中查找")
                 # 从payload的builds中查找deploy_ip
                 builds = payload.get('builds', [])
                 for build in builds:
                     if isinstance(build, dict) and build.get('stage', '').lower() == 'deploy':
                         deploy_ip = build.get('deploy_ip', '')
                         if deploy_ip:
-                            app_logger.info(f"Found deploy_ip from payload: {deploy_ip}")
+                            app_logger.info(f"从payload中找到deploy_ip: {deploy_ip}")
                             break
             
             # 如果没有找到，尝试从variables中查找
@@ -189,17 +189,17 @@ def _find_deploy_ip(commit_url, push_records, push_records_lock, payload, app_lo
                         value = var.get('value', '')
                         if key == 'DEPLOY_REMOTE_HOST' and value:
                             deploy_ip = value
-                            app_logger.info(f"Found deploy_ip from variables: {deploy_ip}")
+                            app_logger.info(f"从variables中找到deploy_ip: {deploy_ip}")
                             break
         except Exception as e:
-            app_logger.error(f"Failed to find deploy_ip: {str(e)}")
+            app_logger.error(f"查找deploy_ip失败: {str(e)}")
             import traceback
             app_logger.error(traceback.format_exc())
     
     # 将deploy_ip数组转换为字符串格式
     if isinstance(deploy_ip, list):
         deploy_ip = ', '.join(deploy_ip)
-    app_logger.info(f"deploy_ip:{deploy_ip}")
+    app_logger.info(f"部署IP:{deploy_ip}")
     
     return deploy_ip
 
@@ -214,7 +214,7 @@ def _replace_duration_with_deploy_ip(elements, deploy_ip, app_logger):
                 'icon': 'location_outlined',
                 'content': f"***部署机器***：{deploy_ip}",
             }
-            app_logger.info(f"Replaced duration with deploy_ip: {deploy_ip}")
+            app_logger.info(f"将持续时间替换为部署IP: {deploy_ip}")
             break
     return elements
 
@@ -227,7 +227,7 @@ def _get_failed_stages(commit_url, push_records, push_records_lock, payload, app
     
     # 1. 优先从push_records中获取failed_stages
     if push_records and push_records_lock and commit_url:
-        app_logger.info(f"Getting failed_stages from push_records for commit_url: {commit_url}")
+        app_logger.info(f"从push_records中获取commit_url: {commit_url}的failed_stages")
         with push_records_lock:
             # 查找匹配的commit
             matching_commit = None
@@ -239,7 +239,7 @@ def _get_failed_stages(commit_url, push_records, push_records_lock, payload, app
                         break
             
             if matching_commit:
-                app_logger.info(f"Found matching commit in push_records")
+                app_logger.info(f"在push_records中找到匹配的commit")
                 stages = matching_commit.get('stages', [])
                 # 从stages中获取status为failed的stage
                 for stage in stages:
@@ -249,27 +249,27 @@ def _get_failed_stages(commit_url, push_records, push_records_lock, payload, app
                             stage_name = stage.get('name', stage.get('stage', 'Unknown'))
                             failed_stages.append(stage_name)
                 
-                app_logger.info(f"Failed stages from push_records: {failed_stages}")
+                app_logger.info(f"从push_records中获取的失败stage: {failed_stages}")
     
     # 2. 如果push_records中没有找到，从payload.get('builds', [])中获取
     if not failed_stages:
-        app_logger.info("No failed_stages from push_records, getting from payload")
+        app_logger.info("在push_records中未找到failed_stages，从payload中获取")
         builds = payload.get('builds', [])
         
         for build in builds:
             if isinstance(build, dict):
                 build_status = build.get('status', '')
                 build_name = build.get('name', 'Unknown')
-                app_logger.info(f"Checking build: {build_name}, status: {build_status}")
+                app_logger.info(f"检查构建: {build_name}, 状态: {build_status}")
                 if build_status == 'failed':
                     failed_stages.append(build_name)
         
-        app_logger.info(f"Failed stages from payload: {failed_stages}")
+        app_logger.info(f"从payload中获取的失败stage: {failed_stages}")
     
     # 3. 如果都没有找到，使用默认值"deploy"
     if not failed_stages:
         failed_stages = ["deploy"]
-        app_logger.info("Using default failed stage: deploy")
+        app_logger.info("使用默认失败stage: deploy")
     
     return failed_stages
 
@@ -373,7 +373,7 @@ def format_message(payload, running_builds=None, running_builds_lock=None, route
     
     # 获取commit_url用于查找push_records
     commit_url = payload.get('commit', {}).get('url', '')
-    app_logger.info(f"Current commit_url: {commit_url}")
+    app_logger.info(f"当前commit_url: {commit_url}")
 
     # 2. 处理parent_pipeline类型，不生成通知
     if 'parent_pipeline' == source:
@@ -490,7 +490,7 @@ def format_message(payload, running_builds=None, running_builds_lock=None, route
         subtitle = f"Pipeline版本号：{pipeline_iid_prev if pipeline_iid_prev else pipeline_iid}"
         if status == 'success' and deploy_ip:
             subtitle += f"，部署设备：{deploy_ip}"
-            app_logger.info(f"subtitle:{subtitle}")
+            app_logger.info(f"副标题:{subtitle}")
         
         # 生成并返回消息
         message = _build_message(project_name, subtitle, detail_url, message_config, text_tag_list)

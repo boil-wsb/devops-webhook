@@ -38,7 +38,7 @@ class BaseLogger:
             if not os.path.exists(self.log_dir):
                 os.makedirs(self.log_dir)
         except Exception as e:
-            logging.warning(f"Warning: Failed to create log directory {self.log_dir}: {str(e)}")
+            logging.warning(f"警告: 无法创建日志目录 {self.log_dir}: {str(e)}")
             # 如果无法创建目录，使用当前目录作为备选
             self.log_dir = '.'
     
@@ -54,7 +54,7 @@ class BaseLogger:
         创建基础的日志格式器
         """
         return logging.Formatter(
-            '%(asctime)s - %(levelname)s - %(message)s',
+            '%(asctime)s.%(msecs)03d - %(levelname)s - %(name)s:%(lineno)d - %(message)s',
             datefmt='%Y-%m-%d %H:%M:%S'
         )
     
@@ -187,7 +187,7 @@ class WebhookLogger(BaseLogger):
             self.logger.info(str(log_entry))
         except Exception as e:
             # 日志记录失败时的错误处理
-            logging.error(f"Error writing webhook log: {str(e)}")
+            logging.error(f"写入webhook日志失败: {str(e)}")
 
 class MonitorLogger(BaseLogger):
     """
@@ -237,7 +237,7 @@ class MonitorLogger(BaseLogger):
             self.logger.info(str(log_entry))
         except Exception as e:
             # 日志记录失败时的错误处理
-            logging.error(f"Error writing monitor event log: {str(e)}")
+            logging.error(f"写入监控事件日志失败: {str(e)}")
 
 
 class AccessLogger(BaseLogger):
@@ -253,9 +253,12 @@ class AccessLogger(BaseLogger):
     def _create_access_formatter(self):
         """
         创建访问日志的专用格式器
-        只记录原始日志条目，不添加额外的时间戳和级别信息
+        使用统一的日志格式
         """
-        return logging.Formatter('%(message)s')
+        return logging.Formatter(
+            '%(asctime)s.%(msecs)03d - %(levelname)s - %(name)s:%(lineno)d - %(message)s',
+            datefmt='%Y-%m-%d %H:%M:%S'
+        )
     
     def _configure_logger(self):
         """
@@ -297,7 +300,7 @@ class AccessLogger(BaseLogger):
             self.logger.info(log_entry)
         except Exception as e:
             # 日志记录失败时的错误处理
-            logging.error(f"Error writing access log: {str(e)}")
+            logging.error(f"写入访问日志失败: {str(e)}")
 
 
 class AppLogger(BaseLogger):
