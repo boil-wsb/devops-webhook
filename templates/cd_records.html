@@ -29,9 +29,6 @@
 
         <!-- 筛选区域 -->
         <div class="filter-section">
-            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px;">
-                <h2>🔍 筛选条件</h2>
-            </div>
             <div class="filter-row">
                 <div class="filter-item">
                     <label for="project-filter">项目名称</label>
@@ -234,6 +231,17 @@
 
             fetchRecords();
         });
+
+        // 处理提交信息：过滤空行但保留换行符
+        function processMessage(message) {
+            if (!message) return '';
+
+            // 按行分割，过滤空行（包括只有空格的行），然后重新连接
+            return message
+                .split('\n')
+                .filter(line => line.trim() !== '')
+                .join('\n');
+        }
 
         // 防抖函数
         function debounce(func, wait) {
@@ -827,17 +835,20 @@
 
                     // 提交信息
                     const messageCell = row.insertCell();
-                    const fullMessage = record.message || '';
+                    const rawMessage = record.message || '';
+
+                    // 处理提交信息：过滤空行但保留换行符
+                    const processedMessage = processMessage(rawMessage);
 
                     // 创建一个包装div，用于实现多行截断
                     const messageWrapper = document.createElement('div');
-                    messageWrapper.textContent = fullMessage;
+                    messageWrapper.textContent = processedMessage;
                     messageWrapper.className = 'message-content';
 
-                    // 添加tooltip事件
-                    if (fullMessage.length > 50) {
+                    // 添加tooltip事件（如果处理后的消息超过50字符或有换行）
+                    if (processedMessage.length > 50 || processedMessage.includes('\n')) {
                         messageWrapper.addEventListener('mouseenter', function(e) {
-                            showTooltip(e, fullMessage);
+                            showTooltip(e, processedMessage);
                         });
                         messageWrapper.addEventListener('mouseleave', hideTooltip);
                         messageWrapper.addEventListener('mousemove', moveTooltip);
@@ -865,9 +876,17 @@
         // 显示Tooltip
         function showTooltip(e, text) {
             const tooltip = document.getElementById('customTooltip');
-            tooltip.textContent = text;
+            // 使用 innerHTML 并保留换行符，将换行符转换为 <br> 标签
+            tooltip.innerHTML = escapeHtml(text).replace(/\n/g, '<br>');
             tooltip.classList.add('show');
             moveTooltip(e);
+        }
+
+        // HTML 转义函数
+        function escapeHtml(text) {
+            const div = document.createElement('div');
+            div.textContent = text;
+            return div.innerHTML;
         }
 
         // 隐藏Tooltip
@@ -882,16 +901,27 @@
             const x = e.clientX;
             const y = e.clientY;
 
-            // 确保tooltip不超出视口
+            // 先获取尺寸（此时tooltip已显示）
             const tooltipRect = tooltip.getBoundingClientRect();
-            let left = x - tooltipRect.width / 2;
-            let top = y - tooltipRect.height - 10;
+            const tooltipWidth = tooltipRect.width;
+            const tooltipHeight = tooltipRect.height;
 
-            if (left < 10) left = 10;
-            if (left + tooltipRect.width > window.innerWidth - 10) {
-                left = window.innerWidth - tooltipRect.width - 10;
+            // 计算位置：水平居中，垂直在鼠标上方
+            let left = x - tooltipWidth / 2;
+            let top = y - tooltipHeight - 15;
+
+            // 边界检查：确保不超出视口
+            const padding = 10;
+            if (left < padding) {
+                left = padding;
             }
-            if (top < 10) top = y + 20;
+            if (left + tooltipWidth > window.innerWidth - padding) {
+                left = window.innerWidth - tooltipWidth - padding;
+            }
+            if (top < padding) {
+                // 如果上方空间不足，显示在鼠标下方
+                top = y + 15;
+            }
 
             tooltip.style.left = left + 'px';
             tooltip.style.top = top + 'px';
