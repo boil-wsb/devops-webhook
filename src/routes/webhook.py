@@ -20,7 +20,8 @@ from src.services import (
     get_failed_job_id,
     get_project_id_by_name,
     parse_error_from_logs,
-    save_build_logs
+    save_build_logs,
+    get_build_logs
 )
 from src.config import WEBHOOK_CONFIG, DEFAULT_TARGET_URL
 from src.utils import convert_utc_to_utc8
