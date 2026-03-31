@@ -548,12 +548,6 @@ def format_error_log_message(project_name, pipeline_iid, branch, error_info, det
                     },
                     {
                         "tag": "markdown",
-                        "content": f"**🔍 最后一个错误**\n```\n{last_error_context[:1000] if last_error_context else error_line[:500]}\n```",
-                        "text_align": "left",
-                        "text_size": "normal"
-                    },
-                    {
-                        "tag": "markdown",
                         "content": f"**⏱️ 时间**: {start_time} → {end_time}\n**👤 构建人员**: {user_name}",
                         "text_align": "left",
                         "text_size": "normal"
