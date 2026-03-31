@@ -158,6 +158,7 @@ def _initialize_data():
         _load_records_from_files()
 
     try:
+        init_database()
         cleanup_old_records()
         start_cleanup_thread()
     except Exception as e:
