@@ -496,5 +496,80 @@ def format_message(payload, running_builds=None, running_builds_lock=None, route
         message = _build_message(project_name, subtitle, detail_url, message_config, text_tag_list)
         app_logger.info(f"message:{message}")
         return message
-    
+
     return None
+
+
+def format_error_log_message(project_name, pipeline_iid, branch, error_info, detail_url, user_name, start_time, end_time):
+    """
+    构建错误日志详情消息
+
+    Args:
+        project_name: 项目名称
+        pipeline_iid: Pipeline IID
+        branch: 分支名称
+        error_info: parse_error_from_logs 返回的错误信息
+        detail_url: Pipeline 详情链接
+        user_name: 构建人员
+        start_time: 开始时间
+        end_time: 结束时间
+
+    Returns:
+        dict: 飞书消息体
+    """
+    error_summary = error_info.get('summary', '')
+    last_error_context = error_info.get('last_error_context', '')
+    error_line = error_info.get('error_line', '')
+
+    max_summary_lines = 30
+    summary_lines = error_summary.split('\n')
+    if len(summary_lines) > max_summary_lines:
+        truncated_summary = '\n'.join(summary_lines[-max_summary_lines:])
+        error_summary_display = f"...\n{truncated_summary}"
+    else:
+        error_summary_display = error_summary
+
+    return {
+        "msg_type": "interactive",
+        "card": {
+            "config": {
+                "update_multi": True
+            },
+            "card_link": {
+                "url": detail_url
+            },
+            "i18n_elements": {
+                "zh_cn": [
+                    {
+                        "tag": "markdown",
+                        "content": f"**📋 错误摘要**\n```\n{error_summary_display[:2000] if error_summary_display else '无日志内容'}\n```",
+                        "text_align": "left",
+                        "text_size": "normal"
+                    },
+                    {
+                        "tag": "markdown",
+                        "content": f"**🔍 最后一个错误**\n```\n{last_error_context[:1000] if last_error_context else error_line[:500]}\n```",
+                        "text_align": "left",
+                        "text_size": "normal"
+                    },
+                    {
+                        "tag": "markdown",
+                        "content": f"**⏱️ 时间**: {start_time} → {end_time}\n**👤 构建人员**: {user_name}",
+                        "text_align": "left",
+                        "text_size": "normal"
+                    }
+                ]
+            },
+            "header": {
+                "title": {
+                    "tag": "plain_text",
+                    "content": f"🔴 构建失败日志 - {project_name}"
+                },
+                "subtitle": {
+                    "tag": "plain_text",
+                    "content": f"Pipeline IID: {pipeline_iid} | 分支: {branch}"
+                },
+                "template": "red"
+            }
+        }
+    }

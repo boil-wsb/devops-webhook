@@ -152,5 +152,15 @@ config.conf
 project.json
 push_records.json
 
+# SQLite database (runtime data)
+data/
+*.db
+*.db-wal
+*.db-shm
+
 # Docker
 docker-compose.override.yml
+
+# Trae
+.trae/
+.docs/

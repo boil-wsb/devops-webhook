@@ -11,6 +11,7 @@ services:
     volumes:
       - ./log:/app/logs
       - ./config/config.conf:/app/config.conf
+      - ./data:/app/data
     restart: unless-stopped
     networks:
       - devops-net

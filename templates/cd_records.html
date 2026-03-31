@@ -144,6 +144,28 @@
     <!-- 自定义 Tooltip -->
     <div id="customTooltip" class="custom-tooltip"></div>
 
+    <!-- 日志详情模态框 -->
+    <div id="logDetailModal" class="modal">
+        <div class="modal-content log-detail-modal">
+            <div class="modal-header">
+                <h2 id="logModalTitle">📄 构建日志</h2>
+                <button class="close" onclick="closeLogDetailModal()">&times;</button>
+            </div>
+            <div class="log-toolbar">
+                <input type="text" id="logSearchInput" placeholder="搜索关键字..." onkeyup="highlightLogSearch(event)">
+                <button onclick="highlightLogSearch()">搜索</button>
+                <button onclick="downloadLogFile()">下载日志</button>
+            </div>
+            <div class="log-content" id="logContent">
+                <pre id="logPreContent"></pre>
+            </div>
+            <div class="error-summary" id="errorSummarySection">
+                <h3>🔍 错误摘要</h3>
+                <pre id="errorSummaryContent"></pre>
+            </div>
+        </div>
+    </div>
+
     <script>
         // 主题切换功能
         function toggleTheme() {
@@ -815,6 +837,10 @@
                     const pipelineStatus = record.pipeline_status || 'unknown';
                     statusSpan.className = `status-badge status-${pipelineStatus}`;
                     statusSpan.textContent = getStatusText(pipelineStatus);
+                    if (pipelineStatus === 'failed') {
+                        statusSpan.style.cursor = 'pointer';
+                        statusSpan.onclick = () => openLogDetailModal(record);
+                    }
                     statusCell.appendChild(statusSpan);
 
                     // 部署IP
@@ -1051,6 +1077,105 @@
                 table.scrollIntoView({ behavior: 'smooth', block: 'start' });
             }
         }
+
+        // 日志详情模态框相关函数
+        let currentLogRecord = null;
+
+        function openLogDetailModal(record) {
+            currentLogRecord = record;
+            const modal = document.getElementById('logDetailModal');
+            const title = document.getElementById('logModalTitle');
+            const logContent = document.getElementById('logPreContent');
+            const errorSummary = document.getElementById('errorSummaryContent');
+            const errorSection = document.getElementById('errorSummarySection');
+
+            title.textContent = `📄 构建日志 - ${record.project_name}`;
+            logContent.textContent = '加载中...';
+            errorSummary.textContent = '';
+            errorSection.style.display = 'none';
+
+            modal.classList.add('show');
+
+            fetchBuildLogs(record.project_name, record.pipeline_iid);
+        }
+
+        async function fetchBuildLogs(projectName, pipelineIid) {
+            try {
+                const response = await fetch(`/api/build-logs/${encodeURIComponent(projectName)}/${pipelineIid}`);
+
+                const logContent = document.getElementById('logPreContent');
+                const errorSummary = document.getElementById('errorSummaryContent');
+                const errorSection = document.getElementById('errorSummarySection');
+
+                if (response.ok) {
+                    const data = await response.json();
+                    if (data.status === 'success' && data.data) {
+                        logContent.textContent = data.data.full_log || '无日志内容';
+                        if (data.data.error_summary) {
+                            errorSummary.textContent = data.data.error_summary;
+                            errorSection.style.display = 'block';
+                        }
+                    } else {
+                        logContent.textContent = '日志不存在或加载失败';
+                    }
+                } else {
+                    logContent.textContent = `加载失败: ${response.status}`;
+                }
+            } catch (error) {
+                console.error('获取日志失败:', error);
+                document.getElementById('logPreContent').textContent = '加载失败: ' + error.message;
+            }
+        }
+
+        function closeLogDetailModal() {
+            const modal = document.getElementById('logDetailModal');
+            modal.classList.remove('show');
+            currentLogRecord = null;
+        }
+
+        function highlightLogSearch(event) {
+            if (event && event.key !== 'Enter' && event.type === 'keyup') {
+                return;
+            }
+
+            const searchInput = document.getElementById('logSearchInput');
+            const logContent = document.getElementById('logPreContent');
+            const searchTerm = searchInput.value.trim();
+
+            logContent.innerHTML = logContent.textContent;
+
+            if (searchTerm) {
+                const regex = new RegExp(`(${searchTerm})`, 'gi');
+                logContent.innerHTML = logContent.textContent.replace(regex, '<span class="log-highlight">$1</span>');
+            }
+        }
+
+        function downloadLogFile() {
+            if (!currentLogRecord) {
+                alert('没有可下载的日志');
+                return;
+            }
+
+            const projectName = currentLogRecord.project_name;
+            const pipelineIid = currentLogRecord.pipeline_iid;
+
+            window.open(`/api/build-logs/${encodeURIComponent(projectName)}/${pipelineIid}/download`, '_blank');
+        }
+
+        // 点击模态框外部关闭
+        window.onclick = function(event) {
+            const modal = document.getElementById('logDetailModal');
+            if (event.target === modal) {
+                closeLogDetailModal();
+            }
+        }
+
+        // ESC 键关闭模态框
+        document.addEventListener('keydown', function(event) {
+            if (event.key === 'Escape') {
+                closeLogDetailModal();
+            }
+        });
     </script>
 </body>
 </html>

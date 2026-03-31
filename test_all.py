@@ -151,11 +151,13 @@ def test_record_services():
     """测试记录服务功能"""
     from src.services.record import record_pipeline_event
     import threading
-    
+
     # 创建测试所需的参数
     pipeline_records = {}
     pipeline_records_lock = threading.Lock()
-    
+    push_records = []
+    push_records_lock = threading.Lock()
+
     # 测试record_pipeline_event
     event_data = {
         "project": {
@@ -169,12 +171,19 @@ def test_record_services():
             "url": "http://example.com/test/test-project/pipelines/123"
         }
     }
-    record_pipeline_event(event_data, subpath="test-subpath", pipeline_records=pipeline_records, pipeline_records_lock=pipeline_records_lock)
+    record_pipeline_event(
+        event_data,
+        subpath="test-subpath",
+        pipeline_records=pipeline_records,
+        pipeline_records_lock=pipeline_records_lock,
+        push_records=push_records,
+        push_records_lock=push_records_lock
+    )
 
 def test_monitor_services():
     """测试监控服务功能"""
     from src.services.monitor import parse_alertmanager_request, send_monitor_message
-    
+
     # 测试parse_alertmanager_request
     alert_data = {
         "alerts": [{
@@ -192,12 +201,135 @@ def test_monitor_services():
     }
     formatted = parse_alertmanager_request(alert_data)
     assert isinstance(formatted, dict)
-    
+
     # 测试send_monitor_message（使用mock避免实际发送）
     with patch('src.services.monitor.requests.post') as mock_post:
         mock_post.return_value.status_code = 200
         result = send_monitor_message("http://example.com", {"msg_type": "text", "content": {"text": "test"}})
         assert result is True
+
+def test_gitlab_logger_services():
+    """测试 GitLab Logger 服务功能"""
+    from src.services.gitlab_logger import get_job_logs, get_failed_job_id, get_project_id_by_name
+
+    # 测试配置获取（不依赖实际 API）
+    gitlab_config_result = None
+    try:
+        from src.services.gitlab_logger import get_gitlab_config
+        gitlab_url, private_token = get_gitlab_config()
+        gitlab_config_result = (gitlab_url, private_token)
+    except Exception:
+        pass
+
+    # 测试函数签名（不实际调用 API）
+    assert callable(get_job_logs)
+    assert callable(get_failed_job_id)
+    assert callable(get_project_id_by_name)
+
+def test_log_parser_services():
+    """测试 Log Parser 服务功能"""
+    from src.services.log_parser import parse_error_from_logs, find_last_error, ERROR_PATTERNS
+
+    # 测试 ERROR_PATTERNS 定义
+    assert isinstance(ERROR_PATTERNS, list)
+    assert len(ERROR_PATTERNS) > 0
+
+    # 测试 find_last_error
+    test_lines = [
+        "Building Docker image...",
+        "Step 1/5 : FROM node:16",
+        "docker tag image:v1.0",
+        "docker push registry.example.com/image:v1.0",
+        "ERROR: failed to connect to registry",
+        "command exited with code 1"
+    ]
+    error_index = find_last_error(test_lines)
+    assert error_index == 4, f"Expected error at index 4, got {error_index}"
+
+    # 测试 parse_error_from_logs
+    test_log = """
+    Building Docker image...
+    Step 1/5 : FROM node:16
+    Running npm install...
+    docker tag image:v1.0
+    docker push registry.example.com/image:v1.0
+    ERROR: failed to connect to registry
+    command exited with code 1
+    """
+
+    result = parse_error_from_logs(test_log, context_lines=2)
+    assert isinstance(result, dict)
+    assert 'summary' in result
+    assert 'error_detail' in result
+    assert 'error_line' in result
+    assert 'last_error_context' in result
+    assert 'ERROR' in result['error_line'] or 'error' in result['error_line'].lower()
+
+def test_log_storage_services():
+    """测试日志存储服务功能"""
+    from src.services.log_storage import (
+        save_build_logs,
+        get_build_logs,
+        get_log_file_path,
+        sanitize_filename
+    )
+
+    # 测试 sanitize_filename
+    assert sanitize_filename("project/name") == "project_name"
+    assert sanitize_filename("branch-name") == "branch-name"
+
+    # 测试 get_log_file_path
+    log_path = get_log_file_path("test-project", "main", 123)
+    assert "test-project" in log_path
+    assert "main" in log_path
+    assert "123" in log_path
+
+    # 测试 save_build_logs 和 get_build_logs
+    test_log_content = "ERROR: test error\ncommand failed"
+    test_error_summary = "ERROR: test error"
+
+    save_result = save_build_logs(
+        project_name="test-project",
+        branch="test-branch",
+        pipeline_iid=999,
+        log_content=test_log_content,
+        error_summary=test_error_summary
+    )
+    assert save_result is True
+
+    # 验证保存的日志可以读取
+    get_result = get_build_logs("test-project", "test-branch", 999)
+    assert get_result is not None
+    assert get_result.get('exists') is True
+    assert test_log_content in get_result.get('full_log', '')
+
+def test_error_log_message_format():
+    """测试错误日志消息格式"""
+    from src.services.message import format_error_log_message
+
+    error_info = {
+        'summary': 'ERROR: connection failed\ncommand exited',
+        'error_detail': 'ERROR: connection failed\ncommand exited',
+        'error_line': 'ERROR: connection failed',
+        'last_error_context': '...\nERROR: connection failed\ncommand exited\n...'
+    }
+
+    message = format_error_log_message(
+        project_name="test-project",
+        pipeline_iid=123,
+        branch="main",
+        error_info=error_info,
+        detail_url="http://example.com/pipeline/123",
+        user_name="test-user",
+        start_time="2024-01-01 10:00:00",
+        end_time="2024-01-01 10:05:00"
+    )
+
+    assert isinstance(message, dict)
+    assert 'card' in message
+    assert 'header' in message['card']
+    assert 'title' in message['card']['header']
+    assert 'test-project' in message['card']['header']['title']['content']
 
 # --------------------------
 # 4. 测试路由功能
@@ -332,6 +464,10 @@ run_test("流水线工具函数", test_pipeline_utils)
 run_test("消息服务", test_message_services)
 run_test("记录服务", test_record_services)
 run_test("监控服务", test_monitor_services)
+run_test("GitLab Logger服务", test_gitlab_logger_services)
+run_test("Log Parser服务", test_log_parser_services)
+run_test("Log Storage服务", test_log_storage_services)
+run_test("错误日志消息格式", test_error_log_message_format)
 
 # 运行路由测试
 run_test("路由注册", test_route_registration)

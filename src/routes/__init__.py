@@ -259,16 +259,21 @@ def register_routes(app):
         获取所有流水线记录
         """
         from src.services import pipeline_records, pipeline_records_lock
-        
+        from src.services.database import PipelineRecordDB
+
         try:
+            db_records = PipelineRecordDB.get_all()
+
             with pipeline_records_lock:
-                # 返回所有记录的列表
-                records_list = list(pipeline_records.values())
-                return jsonify({
-                    'status': 'success',
-                    'data': records_list,
-                    'count': len(records_list)
-                }), 200
+                memory_records = list(pipeline_records.values())
+
+            all_records = db_records if db_records else memory_records
+
+            return jsonify({
+                'status': 'success',
+                'data': all_records,
+                'count': len(all_records)
+            }), 200
         except Exception as e:
             return jsonify({
                 'status': 'error',
@@ -283,23 +288,29 @@ def register_routes(app):
         支持按命名空间筛选：/pipelines/records/view/PD4
         """
         from src.services import pipeline_records, pipeline_records_lock
+        from src.services.database import PipelineRecordDB
         from datetime import datetime
-        
-        with pipeline_records_lock:
-            # 获取所有记录的列表
-            records_list = list(pipeline_records.values())
-            
-        # 合并筛选条件
+
+        try:
+            db_records = PipelineRecordDB.get_all()
+
+            with pipeline_records_lock:
+                memory_records = list(pipeline_records.values())
+
+            records_list = db_records if db_records else memory_records
+        except Exception as e:
+            app_logger.error(f"获取流水线记录失败: {str(e)}")
+            with pipeline_records_lock:
+                records_list = list(pipeline_records.values())
+
         if namespace:
             records_list = [
-                record for record in records_list 
+                record for record in records_list
                 if (namespace in (record.get('subpath') or '') or namespace in (record.get('namespace') or ''))
             ]
-            
-            # 如果没有找到匹配的记录，显示无记录提示
+
             if not records_list:
                 app_logger.info(f"未找到命名空间 {namespace} 的记录")
-                # 返回无记录提示页面
                 return render_template('no_records.html', namespace=namespace)
         
         # 排序：先按record_time降序，无record_time的按project_name升序
@@ -344,16 +355,21 @@ def register_routes(app):
         获取JSON格式的流水线记录
         """
         from src.services import pipeline_records, pipeline_records_lock
-        
+        from src.services.database import PipelineRecordDB
+
         try:
+            db_records = PipelineRecordDB.get_all()
+
             with pipeline_records_lock:
-                # 返回所有记录的列表
-                records_list = list(pipeline_records.values())
-                return jsonify({
-                    'status': 'success',
-                    'data': records_list,
-                    'count': len(records_list)
-                }), 200
+                memory_records = list(pipeline_records.values())
+
+            all_records = db_records if db_records else memory_records
+
+            return jsonify({
+                'status': 'success',
+                'data': all_records,
+                'count': len(all_records)
+            }), 200
         except Exception as e:
             return jsonify({
                 'status': 'error',
@@ -366,36 +382,33 @@ def register_routes(app):
         获取特定项目的最近10条push记录
         """
         from src.services import push_records, push_records_lock
+        from src.services.database import PushRecordDB
         import json
-        import os
         import urllib.parse
-        
+
         try:
-            # 解码URL，因为URL中的斜杠等特殊字符会被编码
             decoded_git_url = urllib.parse.unquote(git_url)
-            
-            # 先从内存中获取
+
+            db_records = PushRecordDB.get_by_git_url(decoded_git_url, limit=10)
+
+            if db_records:
+                for record in db_records:
+                    if record.get('commits') and isinstance(record['commits'], str):
+                        record['commits'] = json.loads(record['commits'])
+                return jsonify({
+                    'status': 'success',
+                    'data': db_records,
+                    'count': len(db_records)
+                }), 200
+
             with push_records_lock:
                 project_push_records = [
-                    record for record in push_records 
+                    record for record in push_records
                     if record.get('git_url') == decoded_git_url
                 ]
-            
-            # 如果内存中没有，从文件中读取
-            if not project_push_records:
-                if os.path.exists('push_records.json'):
-                    with open('push_records.json', 'r', encoding='utf-8') as f:
-                        file_records = json.load(f)
-                        project_push_records = [
-                            record for record in file_records 
-                            if record.get('git_url') == decoded_git_url
-                        ]
-            
-            # 按时间排序，获取最近10条记录
+
             if project_push_records:
-                # 按push_time从晚到早排序
                 project_push_records.sort(key=lambda x: x.get('push_time', ''), reverse=True)
-                # 获取最新的10条记录
                 latest_records = project_push_records[:10]
                 return jsonify({
                     'status': 'success',
@@ -421,39 +434,44 @@ def register_routes(app):
         支持根据subpath参数筛选记录
         """
         from src.services import push_records, push_records_lock
+        from src.services.database import PushRecordDB
         import json
-        import os
         import logging
-        
+
         try:
-            # 获取subpath筛选参数
             subpath_filter = request.args.get('subpath')
-            
-            # 先从内存中获取所有push记录
+
+            db_records = PushRecordDB.get_cd_records(subpath=subpath_filter)
+
             all_records = []
-            with push_records_lock:
-                all_records = push_records.copy()
-            
-            # 如果内存中没有，从文件中读取
-            if not all_records:
-                if os.path.exists('push_records.json'):
-                    with open('push_records.json', 'r', encoding='utf-8') as f:
-                        all_records = json.load(f)
-            
-            # 筛选出存在pipeline_iid的CD记录
+            if db_records:
+                all_records = db_records
+            else:
+                with push_records_lock:
+                    all_records = push_records.copy()
+
             cd_records = []
             for record in all_records:
-                # 如果提供了subpath筛选参数，且当前记录的subpath不匹配，则跳过
                 if subpath_filter and record.get('subpath') != subpath_filter:
                     continue
-                    
+
                 commits = record.get('commits', [])
+                if isinstance(commits, str):
+                    try:
+                        commits = json.loads(commits)
+                    except:
+                        commits = []
+
                 if isinstance(commits, list):
                     for commit in commits:
                         if commit.get('pipeline_iid'):
-                            # 收集部署IP
                             deploy_ips = []
                             stages = commit.get('stages', [])
+                            if isinstance(stages, str):
+                                try:
+                                    stages = json.loads(stages)
+                                except:
+                                    stages = []
                             for stage in stages:
                                 if isinstance(stage, dict):
                                     ip = stage.get('deploy_ip')
@@ -462,21 +480,17 @@ def register_routes(app):
                                             deploy_ips.extend(ip)
                                         else:
                                             deploy_ips.append(ip)
-                            
-                            # 去重
+
                             deploy_ips = list(set(deploy_ips))
-                            
-                            # 只添加存在pipeline_iid且deploy_ips不为空的记录
+
                             if commit.get('pipeline_iid') and deploy_ips:
-                                # 处理ref，去除refs/heads/前缀
                                 original_ref = record.get('ref', '')
                                 processed_ref = original_ref
                                 if processed_ref.startswith('refs/heads/'):
                                     processed_ref = processed_ref.replace('refs/heads/', '')
                                 elif processed_ref.startswith('refs/tags/'):
                                     processed_ref = processed_ref.replace('refs/tags/', '')
-                                
-                                # 创建CD记录
+
                                 cd_record = {
                                     'project_name': record.get('project_name', ''),
                                     'ref': processed_ref,
@@ -489,19 +503,17 @@ def register_routes(app):
                                     'subpath': record.get('subpath', '')
                                 }
                                 cd_records.append(cd_record)
-            
-            # 确保返回的records是数组
+
             return jsonify({
                 'status': 'success',
                 'records': cd_records,
                 'count': len(cd_records)
             }), 200
         except Exception as e:
-            # 记录详细错误日志
             logging.error(f"获取CD记录失败: {str(e)}")
             import traceback
             logging.error(traceback.format_exc())
-            
+
             return jsonify({
                 'status': 'error',
                 'message': str(e),
@@ -516,10 +528,76 @@ def register_routes(app):
         CD记录管理页面
         """
         if return_url:
-            # 还原URL编码的斜杠
             return_url = return_url.replace('__', '/')
             full_return_url = f"/pipelines/records/view/{return_url}"
         else:
             full_return_url = "/pipelines/records/view"
         return render_template('cd_records.html', return_url=full_return_url)
+
+    @app.route('/api/build-logs/<path:project>/<int:pipeline_iid>', methods=['GET'])
+    def get_build_logs_api(project, pipeline_iid):
+        """
+        获取构建日志 API
+        """
+        from src.services import get_build_logs
+        import urllib.parse
+
+        decoded_project = urllib.parse.unquote(project)
+
+        parts = decoded_project.rsplit('/', 1)
+        if len(parts) == 2:
+            project_name = parts[1]
+        else:
+            project_name = decoded_project
+
+        result = get_build_logs(project_name, '', pipeline_iid)
+
+        if result and result.get('exists'):
+            return jsonify({
+                'status': 'success',
+                'data': {
+                    'full_log': result.get('full_log', ''),
+                    'error_summary': result.get('error_summary', ''),
+                    'project_name': project_name,
+                    'pipeline_iid': pipeline_iid
+                }
+            }), 200
+        else:
+            return jsonify({
+                'status': 'error',
+                'message': '日志文件不存在'
+            }), 404
+
+    @app.route('/api/build-logs/<path:project>/<int:pipeline_iid>/download', methods=['GET'])
+    def download_build_logs_api(project, pipeline_iid):
+        """
+        下载构建日志 API
+        """
+        from src.services import get_log_file_path_for_download
+        from flask import send_file
+        import urllib.parse
+
+        decoded_project = urllib.parse.unquote(project)
+
+        parts = decoded_project.rsplit('/', 1)
+        if len(parts) == 2:
+            project_name = parts[1]
+        else:
+            project_name = decoded_project
+
+        log_path = get_log_file_path_for_download(project_name, '', pipeline_iid)
+
+        if log_path:
+            filename = f"{project_name}_pipeline_{pipeline_iid}.log"
+            return send_file(
+                log_path,
+                mimetype='text/plain',
+                as_attachment=True,
+                download_name=filename
+            )
+        else:
+            return jsonify({
+                'status': 'error',
+                'message': '日志文件不存在'
+            }), 404
 
