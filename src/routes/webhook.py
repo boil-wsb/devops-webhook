@@ -158,15 +158,17 @@ def _handle_failed_pipeline(payload):
     log_content = None
     error_info = None
     log_source = None
+    failed_job_name = ""
 
     if project_id:
-        success, job_id, error_msg = get_failed_job_id(pipeline_id, project_id)
+        success, job_id, error_msg, job_name = get_failed_job_id(pipeline_id, project_id)
         if success and job_id:
+            failed_job_name = job_name
             success_get_logs, log_content = get_job_logs(project_id, job_id, max_lines=100)
             if success_get_logs and log_content:
                 log_source = 'gitlab_api'
                 error_info = parse_error_from_logs(log_content)
-                app_logger.info(f"成功从 GitLab API 获取 Job {job_id} 的日志，长度: {len(log_content)}")
+                app_logger.info(f"成功从 GitLab API 获取 Job {job_id} ({job_name}) 的日志，长度: {len(log_content)}")
             else:
                 app_logger.warning(f"从 GitLab API 获取日志失败: {log_content}，将尝试本地日志")
         else:
@@ -180,6 +182,8 @@ def _handle_failed_pipeline(payload):
         if local_logs and local_logs.get('exists') and local_logs.get('full_log'):
             log_content = local_logs.get('full_log', '')
             log_source = 'local_file'
+            if not failed_job_name and local_logs.get('failed_job_name'):
+                failed_job_name = local_logs.get('failed_job_name', '')
             error_info = parse_error_from_logs(log_content)
             app_logger.info(f"成功从本地获取日志，长度: {len(log_content)}")
         else:
@@ -216,7 +220,8 @@ def _handle_failed_pipeline(payload):
                 branch=branch_clean,
                 pipeline_iid=pipeline_iid,
                 log_content=log_content,
-                error_summary=error_info.get('last_error_context', '') if error_info else ''
+                error_summary=error_info.get('last_error_context', '') if error_info else '',
+                failed_job_name=failed_job_name
             )
             app_logger.info(f"已保存构建日志到本地 (来源: {log_source})")
         except Exception as e:

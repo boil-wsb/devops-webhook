@@ -558,6 +558,7 @@ def register_routes(app):
                 'data': {
                     'full_log': result.get('full_log', ''),
                     'error_summary': result.get('error_summary', ''),
+                    'failed_job_name': result.get('failed_job_name', ''),
                     'project_name': project_name,
                     'pipeline_iid': pipeline_iid
                 }

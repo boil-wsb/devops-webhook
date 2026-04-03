@@ -74,7 +74,7 @@ def get_log_file_path(project_name: str, branch: str, pipeline_iid: int) -> str:
 
 
 def save_build_logs(project_name: str, branch: str, pipeline_iid: int,
-                    log_content: str, error_summary: str) -> bool:
+                    log_content: str, error_summary: str, failed_job_name: str = "") -> bool:
     """
     保存构建日志到本地文件
 
@@ -84,6 +84,7 @@ def save_build_logs(project_name: str, branch: str, pipeline_iid: int,
         pipeline_iid: Pipeline IID
         log_content: 完整日志内容
         error_summary: 错误摘要
+        failed_job_name: 失败的Job名称
 
     Returns:
         bool: 保存是否成功
@@ -102,6 +103,12 @@ def save_build_logs(project_name: str, branch: str, pipeline_iid: int,
         with open(error_summary_path, 'w', encoding='utf-8') as f:
             f.write(error_summary)
         app_logger.info(f"错误摘要已保存: {error_summary_path}")
+
+        if failed_job_name:
+            job_info_path = os.path.join(log_dir, 'job_info.txt')
+            with open(job_info_path, 'w', encoding='utf-8') as f:
+                f.write(f"failed_job_name: {failed_job_name}\n")
+            app_logger.info(f"失败Job信息已保存: {job_info_path}")
 
         return True
 
@@ -125,6 +132,7 @@ def get_build_logs(project_name: str, branch: str, pipeline_iid: int) -> Optiona
         dict: {
             'full_log': str,
             'error_summary': str,
+            'failed_job_name': str,
             'exists': bool
         } 或 None
     """
@@ -133,11 +141,13 @@ def get_build_logs(project_name: str, branch: str, pipeline_iid: int) -> Optiona
 
         full_log_path = os.path.join(log_dir, 'full.log')
         error_summary_path = os.path.join(log_dir, 'error_summary.txt')
+        job_info_path = os.path.join(log_dir, 'job_info.txt')
 
         result = {
             'exists': False,
             'full_log': '',
-            'error_summary': ''
+            'error_summary': '',
+            'failed_job_name': ''
         }
 
         if os.path.exists(full_log_path):
@@ -148,6 +158,13 @@ def get_build_logs(project_name: str, branch: str, pipeline_iid: int) -> Optiona
         if os.path.exists(error_summary_path):
             with open(error_summary_path, 'r', encoding='utf-8') as f:
                 result['error_summary'] = f.read()
+
+        if os.path.exists(job_info_path):
+            with open(job_info_path, 'r', encoding='utf-8') as f:
+                content = f.read()
+                for line in content.split('\n'):
+                    if line.startswith('failed_job_name:'):
+                        result['failed_job_name'] = line.split(':', 1)[1].strip()
 
         return result
 

@@ -83,7 +83,7 @@ def get_job_logs(project_id: int, job_id: int, max_lines: int = 100) -> Tuple[bo
         return False, str(e)
 
 
-def get_failed_job_id(pipeline_id: int, project_id: int) -> Tuple[bool, int, str]:
+def get_failed_job_id(pipeline_id: int, project_id: int) -> Tuple[bool, int, str, str]:
     """
     获取 pipeline 中失败的 job ID
 
@@ -92,13 +92,13 @@ def get_failed_job_id(pipeline_id: int, project_id: int) -> Tuple[bool, int, str
         project_id: GitLab 项目 ID
 
     Returns:
-        tuple: (success, job_id 或 0, error_message)
+        tuple: (success, job_id 或 0, error_message, job_name 或 "")
     """
     gitlab_url, private_token = get_gitlab_config()
 
     if not gitlab_url or not private_token:
         app_logger.warning("GitLab 配置不完整，无法获取 Job ID")
-        return False, 0, "GitLab 配置不完整"
+        return False, 0, "GitLab 配置不完整", ""
 
     url = f"{gitlab_url.rstrip('/')}/api/v4/projects/{project_id}/pipelines/{pipeline_id}/jobs"
 
@@ -114,21 +114,23 @@ def get_failed_job_id(pipeline_id: int, project_id: int) -> Tuple[bool, int, str
 
         for job in jobs:
             if job.get('status') == 'failed':
-                app_logger.info(f"找到失败的 Job: {job.get('id')}, 名称: {job.get('name')}")
-                return True, job.get('id'), ""
+                job_id = job.get('id')
+                job_name = job.get('name', '')
+                app_logger.info(f"找到失败的 Job: {job_id}, 名称: {job_name}")
+                return True, job_id, "", job_name
 
         app_logger.warning(f"Pipeline {pipeline_id} 中没有失败的 Job")
-        return False, 0, "没有找到失败的 Job"
+        return False, 0, "没有找到失败的 Job", ""
 
     except requests.exceptions.HTTPError as e:
         app_logger.error(f"GitLab API HTTP 错误: {str(e)}")
-        return False, 0, f"HTTP 错误: {str(e)}"
+        return False, 0, f"HTTP 错误: {str(e)}", ""
     except requests.exceptions.Timeout:
         app_logger.error("GitLab API 请求超时")
-        return False, 0, "请求超时"
+        return False, 0, "请求超时", ""
     except Exception as e:
         app_logger.error(f"获取 Pipeline Jobs 失败: {str(e)}")
-        return False, 0, str(e)
+        return False, 0, str(e), ""
 
 
 def get_project_id_by_name(project_path_with_namespace: str) -> Tuple[bool, int, str]:
