@@ -180,7 +180,7 @@ def init_database():
             with get_db_cursor() as cursor:
                 cursor.execute('PRAGMA journal_mode=WAL')
 
-        app_logger.info("数据库初始化完成")
+        # app_logger.info("数据库初始化完成")
     except Exception as e:
         app_logger.error(f"数据库初始化失败: {str(e)}")
         raise

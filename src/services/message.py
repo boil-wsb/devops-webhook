@@ -29,9 +29,11 @@ def _find_similar_pipeline(project_name, branch, pipeline_iid, source, builds_na
             for record in similar_records:
                 # 将上一个非WEB构建记录的IID重新赋值
                 pipeline_iid_prev = record['pipeline_iid']
+                # app_logger.info(f"找到相似pipeline记录: pipeline_iid={pipeline_iid_prev}, project_name={project_name}, branch={branch}")
                 break  # 只取第一条记录
         else:
-            app_logger.info(f"未找到相同project_name={project_name}, branch={branch}的其他pipeline记录")
+            # app_logger.info(f"未找到相同project_name={project_name}, branch={branch}的其他pipeline记录")
+            pipeline_iid_prev = None
     return pipeline_iid_prev
 
 
@@ -67,7 +69,7 @@ def _build_text_tag_list(pipeline_id, pipeline_iid, source):
     ]
 
 
-def _record_running_build(running_builds, running_builds_lock, pipeline_iid, project_name, branch, user_name, start_time, detail_url, route_name, app_logger):
+def _record_running_build(running_builds, running_builds_lock, pipeline_iid, project_name, branch, user_name, start_time, detail_url, route_name, commit_url, app_logger):
     """
     记录运行中的构建
     """
@@ -83,7 +85,8 @@ def _record_running_build(running_builds, running_builds_lock, pipeline_iid, pro
                     'start_time': datetime.now(),
                     'start_time_str': start_time,
                     'detail_url': detail_url,
-                    'route_name': route_name
+                    'route_name': route_name,
+                    'commit_url': commit_url
                 }
         except Exception as e:
             app_logger.error(f"❌ 记录运行中构建失败: {str(e)}")
@@ -99,6 +102,7 @@ def _remove_completed_build(running_builds, running_builds_lock, pipeline_iid, a
     """
     if running_builds and running_builds_lock:
         try:
+            # 移除已完成构建
             with running_builds_lock:
                 if pipeline_iid in running_builds:
                     del running_builds[pipeline_iid]
@@ -160,9 +164,10 @@ def _find_deploy_ip(commit_url, push_records, push_records_lock, payload, app_lo
                                 stages = matching_commit.get('stages', [])
                                 deploy_stage = next((s for s in stages if isinstance(s, dict) and s.get('deploy_ip')), None)
                                 if deploy_stage:
+                                    # app_logger.info(f"检查stage: {s}")
                                     deploy_ip = deploy_stage.get('deploy_ip', '')
                                     if deploy_ip:
-                                        app_logger.info(f"从push_records中找到deploy_ip: {deploy_ip}")
+                                        # app_logger.info(f"从push_records中找到deploy_ip: {deploy_ip}")
                                         found_deploy_ip = True
                                         break
                             if found_deploy_ip:
@@ -170,7 +175,7 @@ def _find_deploy_ip(commit_url, push_records, push_records_lock, payload, app_lo
             
             # 如果push_records中没有找到，尝试从payload中查找
             if not deploy_ip:
-                app_logger.info(f"在push_records中未找到deploy_ip，尝试从payload中查找")
+                # app_logger.info(f"在push_records中未找到deploy_ip，尝试从payload中查找")
                 # 从payload的builds中查找deploy_ip
                 builds = payload.get('builds', [])
                 for build in builds:
@@ -199,8 +204,10 @@ def _find_deploy_ip(commit_url, push_records, push_records_lock, payload, app_lo
     # 将deploy_ip数组转换为字符串格式
     if isinstance(deploy_ip, list):
         deploy_ip = ', '.join(deploy_ip)
-    app_logger.info(f"部署IP:{deploy_ip}")
-    
+
+    if deploy_ip:
+        app_logger.info(f"部署IP: {deploy_ip}")
+
     return deploy_ip
 
 
@@ -214,7 +221,7 @@ def _replace_duration_with_deploy_ip(elements, deploy_ip, app_logger):
                 'icon': 'location_outlined',
                 'content': f"***部署机器***：{deploy_ip}",
             }
-            app_logger.info(f"将持续时间替换为部署IP: {deploy_ip}")
+                # app_logger.info(f"将持续时间替换为部署IP: {deploy_ip}")
             break
     return elements
 
@@ -227,7 +234,7 @@ def _get_failed_stages(commit_url, push_records, push_records_lock, payload, app
     
     # 1. 优先从push_records中获取failed_stages
     if push_records and push_records_lock and commit_url:
-        app_logger.info(f"从push_records中获取commit_url: {commit_url}的failed_stages")
+        # app_logger.info(f"从push_records中获取commit_url: {commit_url}的failed_stages")
         with push_records_lock:
             # 查找匹配的commit
             matching_commit = None
@@ -239,7 +246,7 @@ def _get_failed_stages(commit_url, push_records, push_records_lock, payload, app
                         break
             
             if matching_commit:
-                app_logger.info(f"在push_records中找到匹配的commit")
+                # app_logger.info(f"在push_records中找到匹配的commit")
                 stages = matching_commit.get('stages', [])
                 # 从stages中获取status为failed的stage
                 for stage in stages:
@@ -249,22 +256,22 @@ def _get_failed_stages(commit_url, push_records, push_records_lock, payload, app
                             stage_name = stage.get('name', stage.get('stage', 'Unknown'))
                             failed_stages.append(stage_name)
                 
-                app_logger.info(f"从push_records中获取的失败stage: {failed_stages}")
+                # app_logger.info(f"从push_records中获取的失败stage: {failed_stages}")
     
     # 2. 如果push_records中没有找到，从payload.get('builds', [])中获取
     if not failed_stages:
-        app_logger.info("在push_records中未找到failed_stages，从payload中获取")
+        # app_logger.info("在push_records中未找到failed_stages，从payload中获取")
         builds = payload.get('builds', [])
         
         for build in builds:
             if isinstance(build, dict):
                 build_status = build.get('status', '')
                 build_name = build.get('name', 'Unknown')
-                app_logger.info(f"检查构建: {build_name}, 状态: {build_status}")
+                # app_logger.info(f"检查构建: {build_name}, 状态: {build_status}")
                 if build_status == 'failed':
                     failed_stages.append(build_name)
         
-        app_logger.info(f"从payload中获取的失败stage: {failed_stages}")
+        # app_logger.info(f"从payload中获取的失败stage: {failed_stages}")
     
     # 3. 如果都没有找到，使用默认值"deploy"
     if not failed_stages:
@@ -408,8 +415,8 @@ def format_message(payload, running_builds=None, running_builds_lock=None, route
         ]
         
         # 记录运行中的构建
-        _record_running_build(running_builds, running_builds_lock, pipeline_iid, project_name, branch, user_name, start_time, detail_url, route_name, app_logger)
-        
+        _record_running_build(running_builds, running_builds_lock, pipeline_iid, project_name, branch, user_name, start_time, detail_url, route_name, commit_url, app_logger)
+
         # 构建消息配置
         message_config = {
             'elements': elements,

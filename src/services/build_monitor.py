@@ -93,11 +93,21 @@ def check_long_running_builds(running_builds, running_builds_lock):
                         elapsed_time = (current_time - build_info['start_time']).total_seconds()
                         app_logger.debug(f"⏱️  已运行时间: {elapsed_time} 秒")
                         
-                        # 检查项目是否在跳过超时检查列表中
+                        # 检查项目是否在跳过超时检查列表中，或者commit_url是否包含跳过关键词
+                        commit_url = build_info.get('commit_url', '')
+                        should_skip = False
+                        
                         if build_info['project_name'] in SKIP_TIMEOUT_CHECK:
-                            # 跳过超时检查
+                            should_skip = True
                             app_logger.debug(f"⏱️  项目 {build_info['project_name']} 在跳过超时检查列表中，跳过本次检查")
-                        else:
+                        elif any(skip_keyword in commit_url for skip_keyword in SKIP_TIMEOUT_CHECK):
+                            should_skip = True
+                            for skip_keyword in SKIP_TIMEOUT_CHECK:
+                                if skip_keyword in commit_url:
+                                    app_logger.debug(f"⏱️  commit_url 包含 '{skip_keyword}' 在跳过超时检查列表中，跳过本次检查")
+                                    break
+                        
+                        if not should_skip:
                             # 获取项目的自定义超时时间，如果没有配置则使用默认值300秒
                             timeout_seconds = TIMEOUT_SECONDS.get(build_info['project_name'], 300)
                             
