@@ -10,7 +10,7 @@ services:
       TZ: Asia/Shanghai
     volumes:
       - ./log:/app/logs
-      - ./config/config.conf:/app/config.conf
+      - ./config/config.yaml:/app/config.yaml
       - ./data:/app/data
     restart: unless-stopped
     networks:

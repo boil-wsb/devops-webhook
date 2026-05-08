@@ -53,27 +53,14 @@ def _register_atexit():
 
 
 def get_db_config():
-    """获取数据库配置"""
-    config_path = 'config.conf'
-    if os.path.exists(config_path):
-        try:
-            import json
-            with open(config_path, 'r', encoding='utf-8') as f:
-                config = json.load(f)
-                return config.get('db_config', {
-                    'db_path': 'webhook.db',
-                    'wal_mode': True,
-                    'retention_days': 30,
-                    'cleanup_hour': 3
-                })
-        except Exception:
-            pass
-    return {
+    from src.config import get_config
+    config = get_config()
+    return config.get('db_config', {
         'db_path': 'webhook.db',
         'wal_mode': True,
         'retention_days': 30,
         'cleanup_hour': 3
-    }
+    })
 
 
 def get_connection():

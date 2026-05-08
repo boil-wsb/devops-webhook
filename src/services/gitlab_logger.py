@@ -6,32 +6,14 @@ app_logger = logging.getLogger('app_logger')
 
 
 def get_gitlab_config():
-    """
-    获取 GitLab 配置
-    Returns:
-        tuple: (gitlab_url, private_token)
-    """
-    from src.config import load_config
-    config_path = 'config.conf'
-    import os
-    config_full_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', '..', config_path)
-
+    from src.config import get_config
+    config = get_config()
     default_gitlab_config = {
         'gitlab_url': '',
         'private_token': ''
     }
-
-    try:
-        if os.path.exists(config_full_path):
-            import json
-            with open(config_full_path, 'r', encoding='utf-8') as f:
-                config = json.load(f)
-                gitlab_config = config.get('gitlab_config', default_gitlab_config)
-                return gitlab_config.get('gitlab_url', ''), gitlab_config.get('private_token', '')
-    except Exception as e:
-        app_logger.error(f"读取 GitLab 配置失败: {str(e)}")
-
-    return default_gitlab_config['gitlab_url'], default_gitlab_config['private_token']
+    gitlab_config = config.get('gitlab_config', default_gitlab_config)
+    return gitlab_config.get('gitlab_url', ''), gitlab_config.get('private_token', '')
 
 
 def get_job_logs(project_id: int, job_id: int, max_lines: int = 100) -> Tuple[bool, str]:

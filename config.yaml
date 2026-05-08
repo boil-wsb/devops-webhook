@@ -1,0 +1,57 @@
+# DevOps Webhook 配置文件
+# 所有配置项均可根据实际环境修改
+
+# ==================== Webhook 配置 ====================
+# 飞书机器人 Webhook 地址映射
+# key: 路由路径, value: 对应的飞书机器人 Webhook URL
+webhook_config:
+  vendor_bot: "https://open.feishu.cn/open-apis/bot/v2/hook/1b78f2d5-0cd0-4035-85fe-a2d8a4b207c6"             # 默认供应商机器人
+  "vendor_bot/v2": "https://open.feishu.cn/open-apis/bot/v2/hook/1b78f2d5-0cd0-4035-85fe-a2d8a4b207c6"          # V2 版本供应商机器人
+  "vendor_bot/itreporter": "https://open.feishu.cn/open-apis/bot/v2/hook/1b78f2d5-0cd0-4035-85fe-a2d8a4b207c6"  # IT 报告机器人
+  "/monitor/event": "https://open.feishu.cn/open-apis/bot/v2/hook/015f8885-3496-4f96-a77e-48c51a220a57"         # 监控告警机器人
+  "vendor_bot/v2/PD4": "https://open.feishu.cn/open-apis/bot/v2/hook/1b78f2d5-0cd0-4035-85fe-a2d8a4b207c6"      # PD4 产品线机器人
+  "vendor_bot/v2/PD3": "https://open.feishu.cn/open-apis/bot/v2/hook/1b78f2d5-0cd0-4035-85fe-a2d8a4b207c6"      # PD3 产品线机器人
+  "vendor_bot/v2/edge": "https://open.feishu.cn/open-apis/bot/v2/hook/1b78f2d5-0cd0-4035-85fe-a2d8a4b207c6"     # Edge 产品线机器人
+  "vendor_bot/v2/DO": "https://open.feishu.cn/open-apis/bot/v2/hook/1b78f2d5-0cd0-4035-85fe-a2d8a4b207c6"       # DO 产品线机器人
+
+# 默认飞书机器人 Webhook URL（路由未匹配时使用）
+default_target_url: "https://open.feishu.cn/open-apis/bot/v2/hook/1b78f2d5-0cd0-4035-85fe-a2d8a4b207c6"
+
+# ==================== GitLab 配置 ====================
+gitlab_config:
+  gitlab_url: "http://192.168.23.19/"   # GitLab 服务器地址
+  private_token: "Mu9hhVd1YsWziz5Nzzrd" # GitLab API 访问令牌（需有 read_api 权限）
+
+# ==================== 日志解析配置 ====================
+log_config:
+  max_lines: 100           # 日志摘要最大行数（截取日志末尾 N 行作为摘要）
+  error_context_lines: 5   # 错误上下文行数（在错误行前后提取 N 行用于定位问题）
+
+# ==================== 日志存储配置 ====================
+log_storage_config:
+  log_storage_path: "logs" # 日志文件存储目录（相对于项目根目录）
+  retention_days: 120      # 日志文件保留天数，超过此天数的日志文件将被清理
+
+# ==================== 数据库配置 ====================
+db_config:
+  db_path: "data/webhook.db" # SQLite 数据库文件路径（相对于项目根目录）
+  wal_mode: true             # 是否启用 WAL 模式（Write-Ahead Logging，提升并发读写性能）
+  retention_days: 120        # 数据库记录保留天数，超过此天数的记录将被定时清理
+  cleanup_hour: 3            # 每日定时清理时间（24小时制，3 表示凌晨 3 点执行清理）
+
+# ==================== MinIO 配置 ====================
+minio_config:
+  minio_endpoint: "http://192.168.23.36:9000" # MinIO 对象存储服务地址
+  minio_access_key: "fYIukgJZaLOivnFimLVX"    # MinIO 访问密钥（Access Key）
+  minio_secret_key: "shdyfYIukgJZaLOivnFimLVX123" # MinIO 密钥（Secret Key）
+
+# ==================== 超时与跳过配置 ====================
+# 跳过超时检查的项目列表（这些项目不会触发超时告警）
+skip_timeout_check:
+  - "edge-2.0"
+
+# 各项目自定义超时时间（秒）
+# key: 项目名称, value: 超时秒数（超过此时间未完成的 Pipeline 将触发超时告警）
+timeout_seconds:
+  Merak: 600
+  AnotherProject: 600

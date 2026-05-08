@@ -3,6 +3,7 @@ import os
 import sys
 import sqlite3
 import logging
+import yaml
 from datetime import datetime
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -26,12 +27,11 @@ def get_json_data(file_path):
 
 
 def get_db_config():
-    """获取数据库配置"""
-    config_path = 'config.conf'
+    config_path = 'config.yaml'
     if os.path.exists(config_path):
         try:
             with open(config_path, 'r', encoding='utf-8') as f:
-                config = json.load(f)
+                config = yaml.safe_load(f)
                 return config.get('db_config', {
                     'db_path': 'webhook.db',
                     'wal_mode': True,

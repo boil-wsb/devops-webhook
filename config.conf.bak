@@ -33,9 +33,7 @@
     "minio_access_key": "fYIukgJZaLOivnFimLVX",
     "minio_secret_key": "shdyfYIukgJZaLOivnFimLVX123"
   },
-  # 跳过超时检查的项目列表，skip_timeout_check 中包含的项目，或者 commit_url 中包含跳过关键词的项目，都会跳过超时检查
   "skip_timeout_check": ["edge-2.0"],
-  # 定制项目超时检查的超时时间，单位秒
   "timeout_seconds": {
     "Merak": 600,
     "AnotherProject": 600

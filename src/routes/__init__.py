@@ -222,10 +222,8 @@ def register_routes(app):
                 formatted_message = parse_alertmanager_request(data)
                 
                 # 检查是否配置了特定的webhook地址用于推送
-                if WEBHOOK_CONFIG['/monitor/event'] == '' or WEBHOOK_CONFIG['/monitor/event'] is None:
-                    pass
-                else:
-                    target_url = WEBHOOK_CONFIG['/monitor/event']
+                target_url = WEBHOOK_CONFIG.get('/monitor/event')
+                if target_url:
                     # 发送格式化后的消息到默认webhook
                     send_monitor_message(target_url, formatted_message)
             except json.JSONDecodeError:
@@ -252,6 +250,85 @@ def register_routes(app):
             
             # 返回错误响应
             return jsonify({'status': 'error', 'message': str(e)}), 500
+    
+    @app.route('/monitor/event/api/v2/alerts', methods=['POST'])
+    def monitor_event_v2_alerts_route():
+        """
+        处理来自 alertmanager 的 alerts v2 API 请求
+        遵循 Alertmanager Webhook API v2 规范
+        参考: https://prometheus.io/docs/alerting/latest/webhook/#webhook-api-v2
+        """
+        from src.services import monitor_logger
+        from datetime import datetime
+        import json
+        
+        try:
+            request_body = request.get_data().decode('utf-8')
+            
+            monitor_logger.log_event(
+                route_name='monitor/event/api/v2/alerts',
+                request_headers=request.headers,
+                request_body=request_body
+            )
+            
+            try:
+                data = json.loads(request_body)
+                
+                if isinstance(data, list):
+                    version = 'v2 (array format)'
+                    alerts = data
+                    app_logger.info(
+                        f"收到 Alertmanager {version} 告警事件, alerts_count={len(alerts)}"
+                    )
+                    
+                    for alert in alerts:
+                        if isinstance(alert, dict):
+                            alert_status = alert.get('status', '')
+                            alert_name = alert.get('labels', {}).get('alertname', 'unknown') if isinstance(alert.get('labels'), dict) else 'unknown'
+                            app_logger.info(
+                                f"告警: {alert_name}, status={alert_status}, "
+                                f"startsAt={alert.get('startsAt')}, endsAt={alert.get('endsAt')}"
+                            )
+                else:
+                    version = data.get('version', 'v1')
+                    group_key = data.get('groupKey', '')
+                    status = data.get('status', '')
+                    receiver = data.get('receiver', '')
+                    alerts = data.get('alerts', [])
+                    
+                    app_logger.info(
+                        f"收到 Alertmanager {version} 告警事件: "
+                        f"groupKey={group_key}, status={status}, receiver={receiver}, alerts_count={len(alerts)}"
+                    )
+                    
+                    for alert in alerts:
+                        alert_status = alert.get('status', '')
+                        alert_name = alert.get('labels', {}).get('alertname', 'unknown') if isinstance(alert.get('labels'), dict) else 'unknown'
+                        app_logger.info(
+                            f"告警: {alert_name}, status={alert_status}, "
+                            f"startsAt={alert.get('startsAt')}, endsAt={alert.get('endsAt')}"
+                        )
+                    
+            except json.JSONDecodeError:
+                app_logger.warning(f"收到无效的JSON请求体: {request_body[:200]}")
+            
+            return jsonify({'status': 'success'}), 200
+            
+        except Exception as e:
+            app_logger.error(f"处理 /monitor/event/api/v2/alerts 请求失败: {str(e)}")
+            import traceback
+            app_logger.error(traceback.format_exc())
+            
+            try:
+                monitor_logger.log_event(
+                    route_name='monitor/event/api/v2/alerts',
+                    request_headers=request.headers,
+                    request_body=str({'error': str(e)})
+                )
+            except:
+                pass
+            
+            return jsonify({'status': 'failed', 'error': str(e)}), 200
     
     @app.route('/pipelines/records', methods=['GET'])
     def pipeline_records_route():

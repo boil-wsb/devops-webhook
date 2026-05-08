@@ -6,31 +6,13 @@ app_logger = logging.getLogger('app_logger')
 
 
 def get_log_storage_config():
-    """
-    获取日志存储配置
-    Returns:
-        dict: 日志存储配置
-    """
-    from src.config import load_config
-    config_path = 'config.conf'
-    config_full_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', '..', config_path)
-
+    from src.config import get_config
+    config = get_config()
     default_storage_config = {
         'log_storage_path': 'logs',
         'retention_days': 30
     }
-
-    try:
-        if os.path.exists(config_full_path):
-            import json
-            with open(config_full_path, 'r', encoding='utf-8') as f:
-                config = json.load(f)
-                storage_config = config.get('log_storage_config', default_storage_config)
-                return storage_config
-    except Exception as e:
-        app_logger.error(f"读取日志存储配置失败: {str(e)}")
-
-    return default_storage_config
+    return config.get('log_storage_config', default_storage_config)
 
 
 def sanitize_filename(filename: str) -> str:

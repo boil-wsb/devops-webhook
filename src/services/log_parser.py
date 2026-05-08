@@ -19,32 +19,14 @@ ERROR_PATTERNS = [
 
 
 def get_log_config():
-    """
-    获取日志配置
-    Returns:
-        tuple: (max_lines, error_context_lines)
-    """
-    from src.config import load_config
-    config_path = 'config.conf'
-    import os
-    config_full_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', '..', config_path)
-
+    from src.config import get_config
+    config = get_config()
     default_log_config = {
         'max_lines': 100,
         'error_context_lines': 5
     }
-
-    try:
-        if os.path.exists(config_full_path):
-            import json
-            with open(config_full_path, 'r', encoding='utf-8') as f:
-                config = json.load(f)
-                log_config = config.get('log_config', default_log_config)
-                return log_config.get('max_lines', 100), log_config.get('error_context_lines', 5)
-    except Exception as e:
-        app_logger.error(f"读取日志配置失败: {str(e)}")
-
-    return default_log_config['max_lines'], default_log_config['error_context_lines']
+    log_config = config.get('log_config', default_log_config)
+    return log_config.get('max_lines', 100), log_config.get('error_context_lines', 5)
 
 
 def find_last_error(lines: List[str]) -> int:
