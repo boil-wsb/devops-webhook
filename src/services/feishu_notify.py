@@ -5,6 +5,7 @@ import requests
 logger = logging.getLogger('app_logger')
 
 _token_cache = {'token': None, 'expires_at': 0}
+_open_id_cache = {}
 
 
 def _get_notify_config():
@@ -33,16 +34,164 @@ def _get_token():
     if not config:
         return None
     base_url = config.get('api_base_url', '')
+    if not base_url:
+        logger.error("飞书通知配置不完整: 缺少 api_base_url")
+        return None
+
     username = config.get('api_username', '')
     password = config.get('api_password', '')
-    if not all([base_url, username, password]):
-        logger.error("飞书通知配置不完整")
+
+    if not username or not password:
+        logger.info("飞书通知未配置 api_username/api_password，使用内网免认证模式")
         return None
+
     token = _login(base_url, username, password)
     if token:
         _token_cache['token'] = token
         _token_cache['expires_at'] = time.time() + 3600
     return token
+
+
+def _build_headers(token):
+    headers = {"Content-Type": "application/json"}
+    if token:
+        headers["Authorization"] = f"Bearer {token}"
+    return headers
+
+
+def _has_credentials():
+    config = _get_notify_config()
+    if not config:
+        return False
+    return bool(config.get('api_username', '') and config.get('api_password', ''))
+
+
+def _refresh_token_on_401(e, headers):
+    if e.response is None or e.response.status_code != 401:
+        return None
+    if not _has_credentials():
+        logger.warning("内网免认证模式下收到 401，无法通过重新登录重试")
+        return None
+    logger.warning("飞书通知 Token 过期，尝试重新登录")
+    global _token_cache
+    _token_cache = {'token': None, 'expires_at': 0}
+    token = _get_token()
+    if token:
+        headers["Authorization"] = f"Bearer {token}"
+        return token
+    return None
+
+
+def get_user_open_id(user_name):
+    if not user_name or not user_name.strip():
+        return None
+
+    if user_name in _open_id_cache:
+        cached = _open_id_cache[user_name]
+        if time.time() < cached.get('expires_at', 0):
+            return cached.get('open_id')
+
+    config = _get_notify_config()
+    if not config:
+        return None
+
+    base_url = config.get('api_base_url', '')
+    if not base_url:
+        logger.error("飞书通知配置不完整: 缺少 api_base_url")
+        return None
+
+    token = _get_token()
+    headers = _build_headers(token)
+    payload = {"name": user_name.strip()}
+
+    lookup_url = f"{base_url.rstrip('/')}/api/v1/open-id"
+
+    try:
+        resp = requests.get(lookup_url, params=payload, headers=headers, timeout=10)
+        if resp.status_code == 404:
+            logger.info(f"open_id 查询接口不可用，尝试通过通知记录获取: user={user_name}")
+            return _get_open_id_from_records(user_name, base_url, headers)
+
+        if resp.status_code == 422:
+            logger.warning(f"open_id 查询接口参数格式不正确: user={user_name}, 尝试通过通知记录获取")
+            return _get_open_id_from_records(user_name, base_url, headers)
+
+        resp.raise_for_status()
+        result = resp.json()
+        open_id = result.get('feishu_open_id') or result.get('feishuOpenId')
+        items = result.get('items', [])
+        if not open_id and items:
+            open_id = items[0].get('feishuOpenId') or items[0].get('feishu_open_id')
+        if open_id:
+            _open_id_cache[user_name] = {
+                'open_id': open_id,
+                'expires_at': time.time() + 3600
+            }
+            logger.info(f"获取用户 open_id 成功: user={user_name}, open_id={open_id}")
+            return open_id
+        else:
+            logger.warning(f"未找到用户 open_id: user={user_name}, result={result}")
+            return _get_open_id_from_records(user_name, base_url, headers)
+    except requests.exceptions.HTTPError as e:
+        new_token = _refresh_token_on_401(e, headers)
+        if new_token:
+            try:
+                resp = requests.get(lookup_url, params=payload, headers=headers, timeout=10)
+                if resp.status_code == 404:
+                    return _get_open_id_from_records(user_name, base_url, headers)
+                if resp.status_code == 422:
+                    return _get_open_id_from_records(user_name, base_url, headers)
+                resp.raise_for_status()
+                result = resp.json()
+                open_id = result.get('feishu_open_id') or result.get('feishuOpenId')
+                items = result.get('items', [])
+                if not open_id and items:
+                    open_id = items[0].get('feishuOpenId') or items[0].get('feishu_open_id')
+                if open_id:
+                    _open_id_cache[user_name] = {
+                        'open_id': open_id,
+                        'expires_at': time.time() + 3600
+                    }
+                    logger.info(f"获取用户 open_id 重试成功: user={user_name}")
+                    return open_id
+                return _get_open_id_from_records(user_name, base_url, headers)
+            except Exception as retry_e:
+                logger.error(f"获取用户 open_id 重试异常: {str(retry_e)}")
+                return _get_open_id_from_records(user_name, base_url, headers)
+        else:
+            logger.error(f"获取用户 open_id 失败: {str(e)}")
+            return _get_open_id_from_records(user_name, base_url, headers)
+    except Exception as e:
+        logger.error(f"获取用户 open_id 异常: {str(e)}")
+        return _get_open_id_from_records(user_name, base_url, headers)
+
+
+def _get_open_id_from_records(user_name, base_url, headers):
+    records_url = f"{base_url.rstrip('/')}/api/v1/notification-records"
+    params = {"user": user_name.strip(), "page_size": 10, "page": 1}
+
+    try:
+        resp = requests.get(records_url, params=params, headers=headers, timeout=10)
+        if resp.status_code == 422:
+            params = {"user": user_name.strip()}
+            resp = requests.get(records_url, params=params, headers=headers, timeout=10)
+        resp.raise_for_status()
+        result = resp.json()
+        items = result.get('items', [])
+        for item in items:
+            open_id = item.get('feishu_open_id')
+            if open_id:
+                _open_id_cache[user_name] = {
+                    'open_id': open_id,
+                    'expires_at': time.time() + 3600
+                }
+                logger.info(f"通过通知记录获取 open_id 成功: user={user_name}, open_id={open_id}")
+                return open_id
+        logger.warning(f"通知记录中未找到用户 open_id: user={user_name}")
+        return None
+    except Exception as e:
+        logger.error(f"通过通知记录获取 open_id 异常: {str(e)}")
+        return None
 
 
 def send_action_result(action_name, project_name, ref, success, output='', error_output='', exit_code=None, ssh_host='', variables=None):
@@ -67,9 +216,7 @@ def send_action_result(action_name, project_name, ref, success, output='', error
         return
 
     token = _get_token()
-    if not token:
-        logger.error("无法获取飞书通知 API Token，跳过通知")
-        return
+    headers = _build_headers(token)
 
     project_ref = f"{project_name or 'N/A'}:{ref or 'N/A'}"
     deploy_dir = (variables or {}).get('DEPLOY_DIR', '')
@@ -118,10 +265,6 @@ def send_action_result(action_name, project_name, ref, success, output='', error
         payload["callback_id"] = callback_id.strip()
 
     notify_url = f"{base_url.rstrip('/')}/api/v1/feishu/notify"
-    headers = {
-        "Authorization": f"Bearer {token}",
-        "Content-Type": "application/json"
-    }
 
     try:
         resp = requests.post(notify_url, json=payload, headers=headers, timeout=15)
@@ -133,21 +276,18 @@ def send_action_result(action_name, project_name, ref, success, output='', error
         else:
             logger.error(f"飞书通知发送失败: {result.get('error')}")
     except requests.exceptions.HTTPError as e:
-        if e.response is not None and e.response.status_code == 401:
-            logger.warning("飞书通知 Token 过期，尝试重新登录")
-            token = _get_token()
-            if token:
-                headers["Authorization"] = f"Bearer {token}"
-                try:
-                    resp = requests.post(notify_url, json=payload, headers=headers, timeout=15)
-                    resp.raise_for_status()
-                    result = resp.json()
-                    if result.get('success'):
-                        logger.info(f"飞书通知重试成功: action={action_name}")
-                    else:
-                        logger.error(f"飞书通知重试失败: {result.get('error')}")
-                except Exception as retry_e:
-                    logger.error(f"飞书通知重试异常: {str(retry_e)}")
+        new_token = _refresh_token_on_401(e, headers)
+        if new_token:
+            try:
+                resp = requests.post(notify_url, json=payload, headers=headers, timeout=15)
+                resp.raise_for_status()
+                result = resp.json()
+                if result.get('success'):
+                    logger.info(f"飞书通知重试成功: action={action_name}")
+                else:
+                    logger.error(f"飞书通知重试失败: {result.get('error')}")
+            except Exception as retry_e:
+                logger.error(f"飞书通知重试异常: {str(retry_e)}")
         else:
             logger.error(f"飞书通知发送失败: {str(e)}")
     except Exception as e:
@@ -177,9 +317,7 @@ def send_card_via_api(card_content, chat_id=None, notify_user=None, callback_id=
             return None
 
     token = _get_token()
-    if not token:
-        logger.error("无法获取飞书通知 API Token，跳过通知")
-        return None
+    headers = _build_headers(token)
 
     payload = {
         "card_content": card_content,
@@ -190,10 +328,6 @@ def send_card_via_api(card_content, chat_id=None, notify_user=None, callback_id=
         payload["callback_id"] = callback_id.strip()
 
     notify_url = f"{base_url.rstrip('/')}/api/v1/feishu/notify"
-    headers = {
-        "Authorization": f"Bearer {token}",
-        "Content-Type": "application/json"
-    }
 
     try:
         resp = requests.post(notify_url, json=payload, headers=headers, timeout=15)
@@ -207,24 +341,21 @@ def send_card_via_api(card_content, chat_id=None, notify_user=None, callback_id=
             logger.error(f"飞书卡片通知发送失败: {result.get('error')}")
             return None
     except requests.exceptions.HTTPError as e:
-        if e.response is not None and e.response.status_code == 401:
-            logger.warning("飞书通知 Token 过期，尝试重新登录")
-            token = _get_token()
-            if token:
-                headers["Authorization"] = f"Bearer {token}"
-                try:
-                    resp = requests.post(notify_url, json=payload, headers=headers, timeout=15)
-                    resp.raise_for_status()
-                    result = resp.json()
-                    if result.get('success'):
-                        logger.info("飞书卡片通知重试成功")
-                        return result
-                    else:
-                        logger.error(f"飞书卡片通知重试失败: {result.get('error')}")
-                        return None
-                except Exception as retry_e:
-                    logger.error(f"飞书卡片通知重试异常: {str(retry_e)}")
+        new_token = _refresh_token_on_401(e, headers)
+        if new_token:
+            try:
+                resp = requests.post(notify_url, json=payload, headers=headers, timeout=15)
+                resp.raise_for_status()
+                result = resp.json()
+                if result.get('success'):
+                    logger.info("飞书卡片通知重试成功")
+                    return result
+                else:
+                    logger.error(f"飞书卡片通知重试失败: {result.get('error')}")
                     return None
+            except Exception as retry_e:
+                logger.error(f"飞书卡片通知重试异常: {str(retry_e)}")
+                return None
         else:
             logger.error(f"飞书卡片通知发送失败: {str(e)}")
             return None
@@ -244,9 +375,7 @@ def update_card_via_api(card_content, message_id, callback_id):
         return None
 
     token = _get_token()
-    if not token:
-        logger.error("无法获取飞书通知 API Token，跳过卡片更新")
-        return None
+    headers = _build_headers(token)
 
     payload = {
         "card_content": card_content,
@@ -254,10 +383,6 @@ def update_card_via_api(card_content, message_id, callback_id):
     }
 
     update_url = f"{base_url.rstrip('/')}/api/v1/feishu/notify/{message_id}"
-    headers = {
-        "Authorization": f"Bearer {token}",
-        "Content-Type": "application/json"
-    }
 
     try:
         resp = requests.patch(update_url, json=payload, headers=headers, timeout=15)
@@ -270,24 +395,21 @@ def update_card_via_api(card_content, message_id, callback_id):
             logger.error(f"飞书卡片通知更新失败: {result.get('error')}")
             return None
     except requests.exceptions.HTTPError as e:
-        if e.response is not None and e.response.status_code == 401:
-            logger.warning("飞书通知 Token 过期，尝试重新登录")
-            token = _get_token()
-            if token:
-                headers["Authorization"] = f"Bearer {token}"
-                try:
-                    resp = requests.patch(update_url, json=payload, headers=headers, timeout=15)
-                    resp.raise_for_status()
-                    result = resp.json()
-                    if result.get('success'):
-                        logger.info("飞书卡片通知更新重试成功")
-                        return result
-                    else:
-                        logger.error(f"飞书卡片通知更新重试失败: {result.get('error')}")
-                        return None
-                except Exception as retry_e:
-                    logger.error(f"飞书卡片通知更新重试异常: {str(retry_e)}")
+        new_token = _refresh_token_on_401(e, headers)
+        if new_token:
+            try:
+                resp = requests.patch(update_url, json=payload, headers=headers, timeout=15)
+                resp.raise_for_status()
+                result = resp.json()
+                if result.get('success'):
+                    logger.info("飞书卡片通知更新重试成功")
+                    return result
+                else:
+                    logger.error(f"飞书卡片通知更新重试失败: {result.get('error')}")
                     return None
+            except Exception as retry_e:
+                logger.error(f"飞书卡片通知更新重试异常: {str(retry_e)}")
+                return None
         else:
             logger.error(f"飞书卡片通知更新失败: {str(e)}")
             return None

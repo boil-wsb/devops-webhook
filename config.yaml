@@ -81,8 +81,8 @@ trigger_actions:
 # user 和 chat_id 二选一，不能同时提供（API 强制要求）
 notify_config:
   api_base_url: "http://localhost:8000"           # ops-manager API 地址
-  api_username: "wangshibin"                      # ops-manager 登录用户名
-  api_password: "mh123456"                        # ops-manager 登录密码
+  # api_username: "wangshibin"                      # ops-manager 登录用户名（内网免认证模式下无需配置）
+  # api_password: "mh123456"                        # ops-manager 登录密码（内网免认证模式下无需配置）
   # notify_user: "wangshibin"                     # 接收飞书通知的用户（ops-manager 用户名 username 或 full_name，与 chat_id 二选一）
   # chat_id: "oc_xxxxxxxxxxxxxxxxxxxxxxxx"        # 飞书群聊 ID（与 notify_user 二选一）
   chat_id: "oc_cb42cb69eb9703e4cb284b516272c920"  # 默认飞书群聊 ID

@@ -125,7 +125,7 @@ def _strip_commit_from_webhook_message(message):
                 continue
             if elem.get('tag') == 'markdown':
                 content = elem.get('content', '')
-                content = re.sub(r'<at\s+id="[^"]*"\s*/>\s*</at>', '', content).strip()
+                content = re.sub(r'<at\s+id="[^"]*"\s*/?>\s*</at>', '', content).strip()
                 if content:
                     elem = dict(elem)
                     elem['content'] = content
@@ -635,8 +635,17 @@ def format_message(payload, running_builds=None, running_builds_lock=None, route
         formatted_commit_title = commit_title.replace('\n', '  \n')
 
         display_user_name = user_name
-        if status == 'failed':  
-            display_user_name = f'<at id="{user_name}"></at>'
+        if status == 'failed':
+            try:
+                from src.services.feishu_notify import get_user_open_id
+                open_id = get_user_open_id(user_name)
+                if open_id:
+                    display_user_name = f'<at id="{open_id}"></at>'
+                else:
+                    display_user_name = user_name
+            except Exception as e:
+                logging.getLogger('app_logger').warning(f"获取 open_id 失败: {str(e)}")
+                display_user_name = user_name
 
         elements = [
             {
