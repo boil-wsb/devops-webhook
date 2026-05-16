@@ -121,8 +121,6 @@ def _strip_commit_from_webhook_message(message):
     for lang, elements in i18n.items():
         new_elements = []
         for elem in elements:
-            if elem.get('tag') == 'markdown' and elem.get('content', '').startswith('***Commit***'):
-                continue
             if elem.get('tag') == 'markdown':
                 content = elem.get('content', '')
                 content = re.sub(r'<at\s+id="[^"]*"\s*/?>\s*</at>', '', content).strip()
