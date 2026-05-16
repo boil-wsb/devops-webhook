@@ -23,7 +23,9 @@ from src.services import (
     save_build_logs,
     get_build_logs
 )
-from src.config import WEBHOOK_CONFIG, DEFAULT_TARGET_URL
+from src.services.trigger_action import check_and_trigger
+from src.services.message import send_notification
+from src.config import WEBHOOK_CONFIG, DEFAULT_TARGET_URL, ROUTE_CHAT_ID_MAP
 from src.utils import convert_utc_to_utc8
 
 
@@ -91,24 +93,53 @@ def process_webhook(request, route_name, subpath=None):
                 app_logger.error(error_msg)
                 return jsonify({"error": error_msg}), 500
         else:
-            # 处理流水线事件
             try:
-                # 记录流水线事件
                 record_pipeline_event(payload, subpath, pipeline_records, pipeline_records_lock, push_records, push_records_lock)
-                
+
+                status = payload['object_attributes'].get('status', '')
+
+                chat_id = ROUTE_CHAT_ID_MAP.get(route_name)
+                message_id = None
+                callback_id = None
+                if status in ['success', 'failed'] and running_builds and running_builds_lock:
+                    with running_builds_lock:
+                        build_info = running_builds.get(payload['object_attributes'].get('iid'))
+                        if build_info:
+                            message_id = build_info.get('message_id')
+                            callback_id = build_info.get('callback_id')
+                            if not chat_id:
+                                chat_id = build_info.get('chat_id')
+
                 try:
                     message = format_message(payload, running_builds, running_builds_lock, route_name, push_records, push_records_lock)
-                    print(f"Generated message: {message}")
                     if message:
-                        status = payload['object_attributes'].get('status', '')
-                        if status == 'failed':
-                            _handle_failed_pipeline(payload)
+                        if status == 'running' and not callback_id and running_builds and running_builds_lock:
+                            with running_builds_lock:
+                                build_info = running_builds.get(payload['object_attributes'].get('iid'))
+                                if build_info:
+                                    callback_id = build_info.get('callback_id')
 
-                        target_url = WEBHOOK_CONFIG.get(route_name, DEFAULT_TARGET_URL)
-                        if not target_url:
-                            raise Exception(f"路由 {route_name} 未配置目标URL")
-                        app_logger.info(f"路由名称: {route_name}, 目标URL: {target_url}")
-                        send_formatted_message(target_url, message)
+                        result = send_notification(route_name, message, chat_id=chat_id, message_id=message_id, callback_id=callback_id)
+                        app_logger.info(f"路由名称: {route_name}, 发送结果: method={result.get('method')}, success={result.get('success')}")
+
+                        if status == 'running' and result.get('method') == 'api' and result.get('message_id'):
+                            with running_builds_lock:
+                                pipeline_iid = payload['object_attributes'].get('iid')
+                                if pipeline_iid in running_builds:
+                                    running_builds[pipeline_iid]['message_id'] = result['message_id']
+                                    running_builds[pipeline_iid]['chat_id'] = chat_id
+
+                        if status == 'failed':
+                            _handle_failed_pipeline(payload, route_name)
+
+                        if status == 'success':
+                            path_with_namespace = payload.get('project', {}).get('path_with_namespace', '')
+                            project_name = payload.get('project', {}).get('name', '')
+                            ref = payload['object_attributes'].get('ref', '')
+                            try:
+                                check_and_trigger(path_with_namespace, ref, project_name=project_name)
+                            except Exception as e:
+                                app_logger.error(f"触发动作执行异常: {str(e)}")
                 except Exception as e:
                     app_logger.error(f"❌ format_message调用失败: {str(e)}")
                     import traceback
@@ -132,13 +163,14 @@ def process_webhook(request, route_name, subpath=None):
         return jsonify({"error": error_msg}), 500
 
 
-def _handle_failed_pipeline(payload):
+def _handle_failed_pipeline(payload, route_name):
     """
     处理失败构建的日志获取和通知发送
     当 GitLab API 失败时，尝试使用本地日志作为降级方案
 
     Args:
         payload: Webhook payload
+        route_name: 当前路由名称
     """
     project_id = payload.get('project', {}).get('id')
     pipeline_id = payload['object_attributes']['id']
@@ -208,8 +240,12 @@ def _handle_failed_pipeline(payload):
     )
 
     try:
-        send_formatted_message(DEFAULT_TARGET_URL, error_message)
-        app_logger.info(f"已发送错误日志消息到 default_target_url (日志来源: {log_source or '无'})")
+        chat_id = ROUTE_CHAT_ID_MAP.get(route_name)
+        result = send_notification(route_name, error_message, chat_id=chat_id)
+        if result.get('success'):
+            app_logger.info(f"已发送错误日志消息 (日志来源: {log_source or '无'}, method={result.get('method')})")
+        else:
+            app_logger.error(f"发送错误日志消息失败")
     except Exception as e:
         app_logger.error(f"发送错误日志消息失败: {str(e)}")
 

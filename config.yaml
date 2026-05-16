@@ -55,3 +55,43 @@ skip_timeout_check:
 timeout_seconds:
   Merak: 600
   AnotherProject: 600
+
+# ==================== 触发动作配置 ====================
+# Pipeline 成功后触发的远程动作（通过 SSH 异步执行）
+# 每个触发项定义匹配条件和要执行的 SSH 命令或脚本
+# 脚本文件统一放置在项目 scripts/ 目录下，执行时自动上传到远程主机
+# variables 中的变量会作为环境变量注入到远程执行环境中
+# 执行完成后会通过飞书通知 API 向指定用户发送卡片通知
+trigger_actions:
+  - name: "iam-release-deploy"                    # 触发动作名称（用于日志标识）
+    project_pattern: "iam"                        # 项目路径匹配模式（path_with_namespace 中包含此字符串即匹配）
+    ref_pattern: "release-1.0.0"                  # 分支名匹配模式（ref 去除前缀后完全匹配）
+    ssh_host: "192.168.111.51"                    # SSH 目标主机地址
+    ssh_port: 22                                  # SSH 端口
+    ssh_user: "root"                              # SSH 用户名
+    ssh_password: "shdy123!"                      # SSH 密码
+    script: "iam_deploy.sh"                       # 脚本文件名（位于 scripts/ 目录下，与 ssh_command 二选一）
+    # ssh_command: "pwd && ls"                    # 直接执行的远程命令（与 script 二选一）
+    variables:                                    # 传递给脚本的环境变量
+      REPO_URL: "192.168.100.213:8083/"
+      DEPLOY_DIR: "/opt/software/iam"
+
+# ==================== 飞书通知配置 ====================
+# 触发动作执行完成后，通过 ops-manager 的飞书通知 API 向指定用户或群聊发送卡片通知
+# user 和 chat_id 二选一，不能同时提供（API 强制要求）
+notify_config:
+  api_base_url: "http://localhost:8000"           # ops-manager API 地址
+  api_username: "wangshibin"                      # ops-manager 登录用户名
+  api_password: "mh123456"                        # ops-manager 登录密码
+  # notify_user: "wangshibin"                     # 接收飞书通知的用户（ops-manager 用户名 username 或 full_name，与 chat_id 二选一）
+  # chat_id: "oc_xxxxxxxxxxxxxxxxxxxxxxxx"        # 飞书群聊 ID（与 notify_user 二选一）
+  chat_id: "oc_cb42cb69eb9703e4cb284b516272c920"  # 默认飞书群聊 ID
+  callback_id: ""                                # 业务回调标识，用于后续卡片更新（可选）
+  route_chat_id_map:
+    vendor_bot: "oc_cb42cb69eb9703e4cb284b516272c920"
+    "vendor_bot/v2": "oc_cb42cb69eb9703e4cb284b516272c920"
+    "vendor_bot/v2/PD4": "oc_cb42cb69eb9703e4cb284b516272c920"
+    "vendor_bot/v2/PD3": "oc_cb42cb69eb9703e4cb284b516272c920"
+    "vendor_bot/v2/edge": "oc_cb42cb69eb9703e4cb284b516272c920"
+    "vendor_bot/v2/DO": "oc_cb42cb69eb9703e4cb284b516272c920"
+    "vendor_bot/itreporter": "oc_e3b21f3ea3254145fb4df9553e4b199b"

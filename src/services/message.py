@@ -1,18 +1,199 @@
 import json
+import logging
 import requests
 from src.utils import format_duration, calculate_interval, convert_utc_to_utc8, find_similar_pipeline_records
-from src.config import WEBHOOK_CONFIG, DEFAULT_TARGET_URL
+from src.config import WEBHOOK_CONFIG, DEFAULT_TARGET_URL, ROUTE_CHAT_ID_MAP
 
 
 def send_formatted_message(target_url, message):
-    """
-    将格式化后的消息发送到指定URL
-    """
     headers = {'Content-Type': 'application/json'}
     response = requests.post(target_url, headers=headers, data=json.dumps(message))
     if response.status_code not in [200, 201]:
         raise Exception(f"Failed to send message. Status code: {response.status_code}, Response: {response.text}")
     return True
+
+
+def convert_webhook_card_to_api_card(webhook_message):
+    card = webhook_message.get('card', {})
+    header = card.get('header', {})
+    i18n_elements = card.get('i18n_elements', {})
+    zh_cn_elements = i18n_elements.get('zh_cn', [])
+
+    api_elements = []
+    for element in zh_cn_elements:
+        tag = element.get('tag', '')
+        if tag == 'markdown':
+            api_elem = {
+                "tag": "markdown",
+                "content": element.get('content', '')
+            }
+            text_align = element.get('text_align')
+            text_size = element.get('text_size')
+            icon = element.get('icon')
+            if text_align:
+                api_elem["text_align"] = text_align
+            if text_size:
+                api_elem["text_size"] = text_size
+            if icon:
+                api_elem["icon"] = icon
+            api_elements.append(api_elem)
+        elif tag == 'hr':
+            api_elements.append({"tag": "hr"})
+        elif tag == 'action':
+            actions = element.get('actions', [])
+            for action_item in actions:
+                if action_item.get('tag') == 'button':
+                    btn = {
+                        "tag": "button",
+                        "type": action_item.get('type', 'default'),
+                        "text": action_item.get('text', {}),
+                    }
+                    url = action_item.get('url') or (action_item.get('multi_url') or {}).get('url')
+                    if url:
+                        btn["behaviors"] = [
+                            {
+                                "type": "open_url",
+                                "default_url": url,
+                                "android_url": url,
+                                "ios_url": url,
+                                "pc_url": url
+                            }
+                        ]
+                    api_elements.append(btn)
+        else:
+            api_elements.append(element)
+
+    subtitle_val = header.get('subtitle', '')
+    if isinstance(subtitle_val, dict):
+        subtitle_val = subtitle_val.get('content', '')
+
+    text_tag_list = header.get('text_tag_list', [])
+    icon_token = header.get('icon_token') or (header.get('ud_icon') or {}).get('token', '')
+    icon_tag = header.get('ud_icon', {}).get('tag', '')
+    api_header = {
+        "title": header.get('title', {}),
+        "template": header.get('template', 'blue')
+    }
+    if subtitle_val:
+        api_header["subtitle"] = {"tag": "plain_text", "content": subtitle_val}
+    if icon_token and icon_tag == 'standard_icon':
+        api_header["icon"] = {
+            "tag": "standard_icon",
+            "token": icon_token
+        }
+    if text_tag_list:
+        api_header["text_tag_list"] = text_tag_list
+
+    card_content = {
+        "schema": "2.0",
+        "header": api_header,
+        "body": {
+            "elements": api_elements
+        }
+    }
+
+    config = card.get('config', {})
+    if config.get('update_multi'):
+        card_content["config"] = {"update_multi": True}
+
+    template = header.get('template', '')
+    if template == 'wathet':
+        if "config" not in card_content:
+            card_content["config"] = {}
+        card_content["config"]["streaming_mode"] = True
+
+    card_link = card.get('card_link')
+    if card_link:
+        card_content["card_link"] = card_link
+
+    return card_content
+
+
+import copy
+import re
+
+
+def _strip_commit_from_webhook_message(message):
+    if message.get('msg_type') != 'interactive' or 'card' not in message:
+        return message
+    stripped = copy.deepcopy(message)
+    i18n = stripped['card'].get('i18n_elements', {})
+    for lang, elements in i18n.items():
+        new_elements = []
+        for elem in elements:
+            if elem.get('tag') == 'markdown' and elem.get('content', '').startswith('***Commit***'):
+                continue
+            if elem.get('tag') == 'markdown':
+                content = elem.get('content', '')
+                content = re.sub(r'<at\s+id="[^"]*"\s*/>\s*</at>', '', content).strip()
+                if content:
+                    elem = dict(elem)
+                    elem['content'] = content
+            new_elements.append(elem)
+        stripped['card']['i18n_elements'][lang] = new_elements
+    return stripped
+
+
+def send_notification(route_name, message, chat_id=None, message_id=None, callback_id=None):
+    app_logger = logging.getLogger('app_logger')
+
+    if message.get('schema') == '2.0':
+        card_content = message
+    else:
+        card_content = convert_webhook_card_to_api_card(message)
+
+    if message_id and callback_id:
+        try:
+            from src.services.feishu_notify import update_card_via_api
+            result = update_card_via_api(card_content, message_id, callback_id)
+            if result and result.get('success'):
+                app_logger.info(f"飞书通知通过API更新成功: route={route_name}, method=api_update")
+                return {
+                    "success": True,
+                    "method": "api_update",
+                    "message_id": message_id
+                }
+            else:
+                app_logger.warning(f"飞书通知API更新失败，降级为Webhook: route={route_name}")
+        except Exception as e:
+            app_logger.warning(f"飞书通知API更新异常，降级为Webhook: route={route_name}, error={str(e)}")
+    else:
+        try:
+            from src.services.feishu_notify import send_card_via_api
+            result = send_card_via_api(
+                card_content,
+                chat_id=chat_id,
+                callback_id=callback_id
+            )
+            if result and result.get('success'):
+                app_logger.info(f"飞书通知通过API发送成功: route={route_name}, method=api")
+                return {
+                    "success": True,
+                    "method": "api",
+                    "message_id": result.get('message_id')
+                }
+            else:
+                app_logger.warning(f"飞书通知API发送失败，降级为Webhook: route={route_name}")
+        except Exception as e:
+            app_logger.warning(f"飞书通知API发送异常，降级为Webhook: route={route_name}, error={str(e)}")
+
+    target_url = WEBHOOK_CONFIG.get(route_name, DEFAULT_TARGET_URL)
+    if not target_url:
+        app_logger.error(f"路由 {route_name} 未配置目标URL，降级发送也失败")
+        return {"success": False, "method": None, "message_id": None}
+
+    try:
+        webhook_message = _strip_commit_from_webhook_message(message)
+        send_formatted_message(target_url, webhook_message)
+        app_logger.info(f"飞书通知通过Webhook降级发送成功: route={route_name}, method=webhook")
+        return {
+            "success": True,
+            "method": "webhook",
+            "message_id": None
+        }
+    except Exception as e:
+        app_logger.error(f"飞书通知Webhook降级发送也失败: route={route_name}, error={str(e)}")
+        return {"success": False, "method": "webhook", "message_id": None}
 
 
 def _find_similar_pipeline(project_name, branch, pipeline_iid, source, builds_name):
@@ -69,10 +250,7 @@ def _build_text_tag_list(pipeline_id, pipeline_iid, source):
     ]
 
 
-def _record_running_build(running_builds, running_builds_lock, pipeline_iid, project_name, branch, user_name, start_time, detail_url, route_name, commit_url, app_logger):
-    """
-    记录运行中的构建
-    """
+def _record_running_build(running_builds, running_builds_lock, pipeline_iid, project_name, branch, user_name, start_time, detail_url, route_name, commit_url, app_logger, chat_id=None):
     if running_builds is not None and running_builds_lock is not None:
         from datetime import datetime
         try:
@@ -86,7 +264,10 @@ def _record_running_build(running_builds, running_builds_lock, pipeline_iid, pro
                     'start_time_str': start_time,
                     'detail_url': detail_url,
                     'route_name': route_name,
-                    'commit_url': commit_url
+                    'commit_url': commit_url,
+                    'chat_id': chat_id,
+                    'message_id': None,
+                    'callback_id': f"pipeline_{pipeline_iid}"
                 }
         except Exception as e:
             app_logger.error(f"❌ 记录运行中构建失败: {str(e)}")
@@ -415,7 +596,8 @@ def format_message(payload, running_builds=None, running_builds_lock=None, route
         ]
         
         # 记录运行中的构建
-        _record_running_build(running_builds, running_builds_lock, pipeline_iid, project_name, branch, user_name, start_time, detail_url, route_name, commit_url, app_logger)
+        chat_id = ROUTE_CHAT_ID_MAP.get(route_name)
+        _record_running_build(running_builds, running_builds_lock, pipeline_iid, project_name, branch, user_name, start_time, detail_url, route_name, commit_url, app_logger, chat_id=chat_id)
 
         # 构建消息配置
         message_config = {
@@ -450,11 +632,16 @@ def format_message(payload, running_builds=None, running_builds_lock=None, route
             end_time = convert_utc_to_utc8(payload['object_attributes']['finished_at'])
             duration = calculate_interval(start_time, end_time)
         
-        # 构建基础elements
+        formatted_commit_title = commit_title.replace('\n', '  \n')
+
+        display_user_name = user_name
+        if status == 'failed':  
+            display_user_name = f'<at id="{user_name}"></at>'
+
         elements = [
             {
                 'icon': 'member_outlined',
-                'content': f"***提交人员***：{user_name}",
+                'content': f"***提交人员***：{display_user_name}",
             },
             {
                 'icon': 'time_outlined',
@@ -467,6 +654,10 @@ def format_message(payload, running_builds=None, running_builds_lock=None, route
             {
                 'icon': 'mindnote_outlined',
                 'content': f"***分      支***：{branch}",
+            },
+            {
+                'icon': 'doc_outlined',
+                'content': f"***Commit***：{formatted_commit_title}",
             },
         ]
         

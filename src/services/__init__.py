@@ -10,6 +10,7 @@ from src.services.build_monitor import start_build_monitor_thread
 from src.services.gitlab_logger import get_job_logs, get_failed_job_id, get_project_id_by_name
 from src.services.log_parser import parse_error_from_logs
 from src.services.log_storage import save_build_logs, get_build_logs, get_log_file_path_for_download
+from src.services.trigger_action import check_and_trigger
 
 # 导入数据库模块
 from src.services.database import init_database, cleanup_old_records, start_cleanup_thread
@@ -51,6 +52,9 @@ __all__ = [
     'save_build_logs',
     'get_build_logs',
     'get_log_file_path_for_download',
+
+    # 触发动作
+    'check_and_trigger',
 
     # 数据库
     'init_database',

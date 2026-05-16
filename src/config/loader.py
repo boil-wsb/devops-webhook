@@ -34,10 +34,12 @@ def get_config(config_file='config.yaml'):
 
 def load_config(config_file='config.yaml'):
     config = get_config(config_file)
+    notify_config = config.get('notify_config', {})
     return (
         config.get('webhook_config', {}),
         config.get('default_target_url', ''),
         config.get('minio_config', {}),
         config.get('skip_timeout_check', []),
         config.get('timeout_seconds', {}),
+        notify_config.get('route_chat_id_map', {}),
     )

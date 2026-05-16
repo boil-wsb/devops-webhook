@@ -1,8 +1,8 @@
 import time
 from datetime import datetime
 import threading
-from src.config import WEBHOOK_CONFIG, DEFAULT_TARGET_URL, SKIP_TIMEOUT_CHECK, TIMEOUT_SECONDS
-from src.services.message import send_formatted_message
+from src.config import WEBHOOK_CONFIG, DEFAULT_TARGET_URL, SKIP_TIMEOUT_CHECK, TIMEOUT_SECONDS, ROUTE_CHAT_ID_MAP
+from src.services.message import send_formatted_message, send_notification
 
 
 
@@ -19,12 +19,16 @@ def send_long_build_alert(build_info, route_name):
     app_logger = logging.getLogger('app_logger')
     try:
         duration_minutes = int((datetime.now() - build_info['start_time']).total_seconds() / 60)
-        
+        detail_url = build_info.get('detail_url', '')
+
         long_build_message = {
             "msg_type": "interactive",
             "card": {
                 "config": {
                     "update_multi": True
+                },
+                "card_link": {
+                    "url": detail_url
                 },
                 "header": {
                     "title": {
@@ -56,11 +60,12 @@ def send_long_build_alert(build_info, route_name):
             }
         }
         
-        # 发送告警，使用传入的route_name获取对应的target_url
-        target_url = WEBHOOK_CONFIG.get(route_name, DEFAULT_TARGET_URL)
-        if target_url:
-            send_formatted_message(target_url, long_build_message)
-            app_logger.info(f"已发送构建超时告警: {build_info['pipeline_iid']}，使用路由: {route_name}")
+        chat_id = ROUTE_CHAT_ID_MAP.get(route_name) or build_info.get('chat_id')
+        result = send_notification(route_name, long_build_message, chat_id=chat_id)
+        if result.get('success'):
+            app_logger.info(f"已发送构建超时告警: {build_info['pipeline_iid']}，使用路由: {route_name}, method={result.get('method')}")
+        else:
+            app_logger.error(f"发送构建超时告警失败: {build_info['pipeline_iid']}")
         
     except Exception as e:
             app_logger.error(f"发送构建超时告警失败: {str(e)}")

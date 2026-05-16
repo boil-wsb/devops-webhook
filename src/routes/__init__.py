@@ -39,8 +39,9 @@ def register_routes(app):
         处理来自远程服务器的JSON请求
         接收JSON数据，根据report_path从MinIO下载文件到本地
         """
-        from src.services import send_formatted_message
-        from src.config import WEBHOOK_CONFIG, DEFAULT_TARGET_URL, MINIO_CONFIG
+        from src.services.message import send_notification
+        from src.services.report_parser import parse_health_check_report, build_inspection_card_elements
+        from src.config import WEBHOOK_CONFIG, DEFAULT_TARGET_URL, MINIO_CONFIG, ROUTE_CHAT_ID_MAP
         from minio import Minio
         from minio.error import S3Error
         import json
@@ -87,77 +88,59 @@ def register_routes(app):
                     expires=timedelta(hours=2)
                 )
                 
-                # 组装飞书卡片消息 - 优化markdown格式
                 file_size = os.path.getsize(local_filepath)
                 file_size_mb = round(file_size / (1024 * 1024), 2)
-                
+
+                report_data = None
+                try:
+                    with open(local_filepath, 'r', encoding='utf-8') as f:
+                        html_content = f.read()
+                    report_data = parse_health_check_report(html_content)
+                    if report_data:
+                        app_logger.info(f"巡检报告解析成功: 正常={report_data['ok_count']}, 警告={report_data['warning_count']}, 严重={report_data['critical_count']}")
+                    else:
+                        app_logger.warning("巡检报告解析返回空结果")
+                except Exception as e:
+                    app_logger.error(f"解析巡检报告失败: {str(e)}")
+
+                card_elements, card_template = build_inspection_card_elements(
+                    report_data, presigned_url, file_size_mb, report_path
+                )
+
                 feishu_card_message = {
-                    "msg_type": "interactive",
-                    "card": {
-                        "config": {
-                            "update_multi": True,
-                            "enable_forward": True
+                    "schema": "2.0",
+                    "header": {
+                        "title": {
+                            "tag": "plain_text",
+                            "content": "📊 IT系统健康巡检报告"
                         },
-                        "header": {
-                            "title": {
-                                "tag": "plain_text",
-                                "content": "📊 IT系统运行报告"
-                            },
-                            "subtitle": {
-                                "tag": "plain_text", 
-                                "content": f"📋 {os.path.basename(report_path)}"
-                            },
-                            "template": "blue"
+                        "subtitle": {
+                            "tag": "plain_text",
+                            "content": os.path.basename(report_path)
                         },
-                        "i18n_elements": {
-                            "zh_cn": [
-                                {
-                                    "tag": "markdown",
-                                    "content": f"📁 报告路径 : {report_path} \n"
-                                                f"🗄️ 存储桶 : {bucket_name} \n"
-                                                f"📏 文件大小 : {file_size_mb} MB \n"
-                                                f"⏱️ 有效期 : 2小时 \n\n"
-                                                f"> ⚠️ **安全提醒**: 下载链接有效期为2小时，请尽快下载",
-                                    "text_align": "left",
-                                    "text_size": "normal"
-                                },
-                                {
-                                    "tag": "hr"
-                                },
-                                {
-                                    "tag": "action",
-                                    "actions": [
-                                        {
-                                            "tag": "button",
-                                            "type": "primary",
-                                            "text": {
-                                                "tag": "plain_text",
-                                                "content": "📥 下载报告"
-                                            },
-                                            "url": presigned_url,
-                                            "multi_url": {
-                                                "url": presigned_url,
-                                                "android_url": presigned_url,
-                                                "ios_url": presigned_url,
-                                                "pc_url": presigned_url
-                                            }
-                                        }
-                                    ]
-                                }
-                            ]
-                        }
+                        "template": card_template
+                    },
+                    "body": {
+                        "elements": card_elements
+                    },
+                    "config": {
+                        "update_multi": True
                     }
                 }
                 
-                # 发送到对应的webhook
-                target_url = WEBHOOK_CONFIG.get('vendor_bot/itreporter', DEFAULT_TARGET_URL)
-                if target_url and presigned_url:
+                route_name = 'vendor_bot/itreporter'
+                chat_id = ROUTE_CHAT_ID_MAP.get(route_name)
+                if presigned_url:
                     try:
-                        send_formatted_message(target_url, feishu_card_message)
+                        result = send_notification(route_name, feishu_card_message, chat_id=chat_id)
+                        if result.get('success'):
+                            app_logger.info(f"IT报告通知发送成功: method={result.get('method')}")
+                        else:
+                            app_logger.error(f"IT报告通知发送失败")
                     except Exception as e:
                         app_logger.error(f"❌ 飞书消息发送失败: {str(e)}")
                 else:
-                    app_logger.warning(f"⚠️ 未发送飞书消息: target_url={target_url}, presigned_url={presigned_url}")
+                    app_logger.warning(f"⚠️ 未发送飞书消息: presigned_url={presigned_url}")
 
                 
             except Exception as e:
