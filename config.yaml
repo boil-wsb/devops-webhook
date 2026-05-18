@@ -8,7 +8,7 @@ webhook_config:
   vendor_bot: "https://open.feishu.cn/open-apis/bot/v2/hook/1b78f2d5-0cd0-4035-85fe-a2d8a4b207c6"             # 默认供应商机器人
   "vendor_bot/v2": "https://open.feishu.cn/open-apis/bot/v2/hook/1b78f2d5-0cd0-4035-85fe-a2d8a4b207c6"          # V2 版本供应商机器人
   "vendor_bot/itreporter": "https://open.feishu.cn/open-apis/bot/v2/hook/1b78f2d5-0cd0-4035-85fe-a2d8a4b207c6"  # IT 报告机器人
-  "/monitor/event": "https://open.feishu.cn/open-apis/bot/v2/hook/015f8885-3496-4f96-a77e-48c51a220a57"         # 监控告警机器人
+  "monitor/event": "https://open.feishu.cn/open-apis/bot/v2/hook/015f8885-3496-4f96-a77e-48c51a220a57"         # 监控告警机器人
   "vendor_bot/v2/PD4": "https://open.feishu.cn/open-apis/bot/v2/hook/1b78f2d5-0cd0-4035-85fe-a2d8a4b207c6"      # PD4 产品线机器人
   "vendor_bot/v2/PD3": "https://open.feishu.cn/open-apis/bot/v2/hook/1b78f2d5-0cd0-4035-85fe-a2d8a4b207c6"      # PD3 产品线机器人
   "vendor_bot/v2/edge": "https://open.feishu.cn/open-apis/bot/v2/hook/1b78f2d5-0cd0-4035-85fe-a2d8a4b207c6"     # Edge 产品线机器人
@@ -95,3 +95,4 @@ notify_config:
     "vendor_bot/v2/edge": "oc_cb42cb69eb9703e4cb284b516272c920"
     "vendor_bot/v2/DO": "oc_cb42cb69eb9703e4cb284b516272c920"
     "vendor_bot/itreporter": "oc_e3b21f3ea3254145fb4df9553e4b199b"
+    "default_webhook": "oc_cb42cb69eb9703e4cb284b516272c920"

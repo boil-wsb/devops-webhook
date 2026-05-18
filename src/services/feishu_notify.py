@@ -1,11 +1,14 @@
 import logging
 import time
 import requests
+import threading
 
 logger = logging.getLogger('app_logger')
 
 _token_cache = {'token': None, 'expires_at': 0}
 _open_id_cache = {}
+_sent_cards = {}
+_sent_cards_lock = threading.Lock()
 
 
 def _get_notify_config():
@@ -416,3 +419,64 @@ def update_card_via_api(card_content, message_id, callback_id):
     except Exception as e:
         logger.error(f"飞书卡片通知更新异常: {str(e)}")
         return None
+
+
+def store_sent_card(callback_id, card_content, chat_id=None):
+    if not callback_id:
+        return
+    with _sent_cards_lock:
+        _sent_cards[callback_id] = {
+            'card_content': card_content,
+            'chat_id': chat_id,
+            'stored_at': time.time()
+        }
+        if len(_sent_cards) > 500:
+            sorted_keys = sorted(_sent_cards.keys(), key=lambda k: _sent_cards[k]['stored_at'])
+            for k in sorted_keys[:100]:
+                del _sent_cards[k]
+
+
+def get_sent_card(callback_id):
+    with _sent_cards_lock:
+        return _sent_cards.get(callback_id)
+
+
+def forward_card_to_assignee(callback_id, assignee_open_id):
+    card_info = get_sent_card(callback_id)
+    if not card_info:
+        logger.error(f"未找到已发送卡片: callback_id={callback_id}")
+        return None
+
+    card_content = card_info['card_content']
+    result = send_card_via_api(card_content, notify_user=assignee_open_id)
+    if result and result.get('success'):
+        logger.info(f"卡片已转发给负责人: callback_id={callback_id}, assignee={assignee_open_id}")
+    else:
+        logger.error(f"卡片转发失败: callback_id={callback_id}, result={result}")
+    return result
+
+
+def handle_card_action_callback(data):
+    action = data.get('action', {})
+    value = action.get('value', {})
+    action_type = value.get('action', '')
+
+    if action_type == 'forward_to_assignee':
+        callback_id = value.get('callback_id', '')
+        assignee_open_id = value.get('assignee_open_id', '')
+        operator_open_id = data.get('open_id', '')
+
+        logger.info(f"收到卡片转发回调: callback_id={callback_id}, operator={operator_open_id}, assignee={assignee_open_id}")
+
+        result = forward_card_to_assignee(callback_id, assignee_open_id)
+
+        if result and result.get('success'):
+            return {
+                "toast": {"type": "success", "content": "已转交负责人处理"}
+            }
+        else:
+            return {
+                "toast": {"type": "error", "content": "转交失败，请稍后重试"}
+            }
+
+    return None

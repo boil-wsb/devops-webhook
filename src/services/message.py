@@ -121,6 +121,8 @@ def _strip_commit_from_webhook_message(message):
     for lang, elements in i18n.items():
         new_elements = []
         for elem in elements:
+            if elem.get('tag') == 'action':
+                continue
             if elem.get('tag') == 'markdown':
                 content = elem.get('content', '')
                 content = re.sub(r'<at\s+id="[^"]*"\s*/?>\s*</at>', '', content).strip()
@@ -142,7 +144,8 @@ def send_notification(route_name, message, chat_id=None, message_id=None, callba
 
     if message_id and callback_id:
         try:
-            from src.services.feishu_notify import update_card_via_api
+            from src.services.feishu_notify import update_card_via_api, store_sent_card
+            store_sent_card(callback_id, card_content, chat_id=chat_id)
             result = update_card_via_api(card_content, message_id, callback_id)
             if result and result.get('success'):
                 app_logger.info(f"飞书通知通过API更新成功: route={route_name}, method=api_update")
@@ -157,7 +160,8 @@ def send_notification(route_name, message, chat_id=None, message_id=None, callba
             app_logger.warning(f"飞书通知API更新异常，降级为Webhook: route={route_name}, error={str(e)}")
     else:
         try:
-            from src.services.feishu_notify import send_card_via_api
+            from src.services.feishu_notify import send_card_via_api, store_sent_card
+            store_sent_card(callback_id, card_content, chat_id=chat_id)
             result = send_card_via_api(
                 card_content,
                 chat_id=chat_id,
@@ -486,10 +490,67 @@ def _update_failed_status_tag_list(text_tag_list, payload, commit_url, push_reco
     return text_tag_list
 
 
-def _build_message(project_name, subtitle, detail_url, message_config, text_tag_list):
+def _build_message(project_name, subtitle, detail_url, message_config, text_tag_list, callback_id=None):
     """
     构建最终的消息结构
     """
+    i18n_elements = []
+    for element in message_config['elements']:
+        if element.get('is_button'):
+            if element.get('button_callback'):
+                btn_value = dict(element.get('button_value', {}))
+                if callback_id:
+                    btn_value['callback_id'] = callback_id
+                i18n_elements.append({
+                    "tag": "action",
+                    "actions": [
+                        {
+                            "tag": "button",
+                            "type": "primary",
+                            "text": {
+                                "tag": "plain_text",
+                                "content": element['button_text']
+                            },
+                            "value": btn_value
+                        }
+                    ]
+                })
+            else:
+                i18n_elements.append({
+                    "tag": "action",
+                    "actions": [
+                        {
+                            "tag": "button",
+                            "type": "primary",
+                            "text": {
+                                "tag": "plain_text",
+                                "content": element['button_text']
+                            },
+                            "behaviors": [
+                                {
+                                    "type": "open_url",
+                                    "default_url": element['button_url'],
+                                    "android_url": element['button_url'],
+                                    "ios_url": element['button_url'],
+                                    "pc_url": element['button_url']
+                                }
+                            ]
+                        }
+                    ]
+                })
+        else:
+            i18n_elements.append({
+                "tag": "markdown",
+                "content": element['content'],
+                "text_align": "left",
+                "text_size": "normal",
+                "icon": {
+                    "tag": "standard_icon",
+                    "token": element['icon'],
+                    "color": "grey"
+                }
+            })
+    
     return {
         "msg_type": "interactive",
         "card": {
@@ -500,19 +561,7 @@ def _build_message(project_name, subtitle, detail_url, message_config, text_tag_
                 "url": detail_url
             },
             "i18n_elements": {
-                "zh_cn": [
-                    {
-                        "tag": "markdown",
-                        "content": element['content'],
-                        "text_align": "left",
-                        "text_size": "normal",
-                        "icon": {
-                            "tag": "standard_icon",
-                            "token": element['icon'],
-                            "color": "grey"
-                        }
-                    } for element in message_config['elements']
-                ]
+                "zh_cn": i18n_elements
             },
             "header": {
                 "title": {
@@ -675,6 +724,19 @@ def format_message(payload, running_builds=None, running_builds_lock=None, route
         if status == 'failed' and deploy_ip:
             elements = _replace_duration_with_deploy_ip(elements, deploy_ip, app_logger)
         
+        # 如果pipeline失败，添加转交负责人按钮
+        if status == 'failed':
+            assignee_open_id = "ou_e7e3a761a4bc2e3ae17402c67d7685ae"
+            elements.append({
+                'is_button': True,
+                'button_text': '转交运维处理',
+                'button_callback': True,
+                'button_value': {
+                    'action': 'forward_to_assignee',
+                    'assignee_open_id': assignee_open_id
+                }
+            })
+        
         # 构建消息配置
         message_config = {
             'elements': elements,
@@ -698,7 +760,8 @@ def format_message(payload, running_builds=None, running_builds_lock=None, route
             app_logger.info(f"副标题:{subtitle}")
         
         # 生成并返回消息
-        message = _build_message(project_name, subtitle, detail_url, message_config, text_tag_list)
+        callback_id = f"pipeline_{pipeline_iid}" if status == 'failed' else None
+        message = _build_message(project_name, subtitle, detail_url, message_config, text_tag_list, callback_id=callback_id)
         app_logger.info(f"message:{message}")
         return message
 

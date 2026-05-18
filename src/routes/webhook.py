@@ -25,7 +25,7 @@ from src.services import (
 )
 from src.services.trigger_action import check_and_trigger
 from src.services.message import send_notification
-from src.config import WEBHOOK_CONFIG, DEFAULT_TARGET_URL, ROUTE_CHAT_ID_MAP
+from src.config import WEBHOOK_CONFIG, DEFAULT_TARGET_URL, ROUTE_CHAT_ID_MAP, get_config
 from src.utils import convert_utc_to_utc8
 
 
@@ -241,6 +241,11 @@ def _handle_failed_pipeline(payload, route_name):
 
     try:
         chat_id = ROUTE_CHAT_ID_MAP.get(route_name)
+        if not chat_id:
+            notify_config = get_config().get('notify_config', {})
+            chat_id = notify_config.get('webhooks', {}).get('default_webhook')
+            if chat_id:
+                app_logger.info(f"使用 default_webhook 发送错误日志: {chat_id}")
         result = send_notification(route_name, error_message, chat_id=chat_id)
         if result.get('success'):
             app_logger.info(f"已发送错误日志消息 (日志来源: {log_source or '无'}, method={result.get('method')})")

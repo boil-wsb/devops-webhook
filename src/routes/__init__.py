@@ -629,6 +629,32 @@ def register_routes(app):
                 'message': '日志文件不存在'
             }), 404
 
+    @app.route('/api/feishu/card-action', methods=['POST'])
+    def feishu_card_action_route():
+        """
+        处理飞书卡片动作回调
+        当用户点击卡片中的 callback 按钮时，飞书会向此端点发送回调请求
+        """
+        import json
+        try:
+            data = request.get_json(force=True)
+            app_logger.info(f"收到飞书卡片动作回调: {json.dumps(data, ensure_ascii=False)[:500]}")
+
+            if data.get('type') == 'url_verification':
+                return jsonify({"challenge": data.get('challenge')})
+
+            from src.services.feishu_notify import handle_card_action_callback
+            result = handle_card_action_callback(data)
+
+            if result:
+                return jsonify(result)
+            else:
+                return jsonify({})
+
+        except Exception as e:
+            app_logger.error(f"处理飞书卡片动作回调失败: {str(e)}")
+            return jsonify({})
+
     @app.route('/api/build-logs/<path:project>/<int:pipeline_iid>/download', methods=['GET'])
     def download_build_logs_api(project, pipeline_iid):
         """
