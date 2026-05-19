@@ -40,7 +40,6 @@ def convert_webhook_card_to_api_card(webhook_message):
         elif tag == 'hr':
             api_elements.append({"tag": "hr"})
         elif tag == 'action':
-            api_actions = []
             for action_item in element.get('actions', []):
                 if action_item.get('tag') == 'button':
                     btn = {
@@ -61,12 +60,7 @@ def convert_webhook_card_to_api_card(webhook_message):
                                 "pc_url": url
                             }
                         ]
-                    api_actions.append(btn)
-            if api_actions:
-                api_elements.append({
-                    "tag": "action",
-                    "actions": api_actions
-                })
+                    api_elements.append(btn)
         else:
             api_elements.append(element)
 
