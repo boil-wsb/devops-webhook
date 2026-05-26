@@ -79,25 +79,23 @@ def save_build_logs(project_name: str, branch: str, pipeline_iid: int,
         full_log_path = os.path.join(log_dir, 'full.log')
         with open(full_log_path, 'w', encoding='utf-8') as f:
             f.write(log_content)
-        app_logger.info(f"完整日志已保存: {full_log_path}")
+        app_logger.info(f"log_storage | save_full_log | path={full_log_path}")
 
         error_summary_path = os.path.join(log_dir, 'error_summary.txt')
         with open(error_summary_path, 'w', encoding='utf-8') as f:
             f.write(error_summary)
-        app_logger.info(f"错误摘要已保存: {error_summary_path}")
+        app_logger.info(f"log_storage | save_error_summary | path={error_summary_path}")
 
         if failed_job_name:
             job_info_path = os.path.join(log_dir, 'job_info.txt')
             with open(job_info_path, 'w', encoding='utf-8') as f:
                 f.write(f"failed_job_name: {failed_job_name}\n")
-            app_logger.info(f"失败Job信息已保存: {job_info_path}")
+            app_logger.info(f"log_storage | save_job_info | path={job_info_path}")
 
         return True
 
     except Exception as e:
-        app_logger.error(f"保存构建日志失败: {str(e)}")
-        import traceback
-        app_logger.error(traceback.format_exc())
+        app_logger.error(f"log_storage | save_failed | error={e}")
         return False
 
 
@@ -151,7 +149,7 @@ def get_build_logs(project_name: str, branch: str, pipeline_iid: int) -> Optiona
         return result
 
     except Exception as e:
-        app_logger.error(f"获取构建日志失败: {str(e)}")
+        app_logger.error(f"log_storage | get_failed | error={e}")
         return None
 
 
@@ -177,5 +175,5 @@ def get_log_file_path_for_download(project_name: str, branch: str, pipeline_iid:
         return None
 
     except Exception as e:
-        app_logger.error(f"获取日志文件路径失败: {str(e)}")
+        app_logger.error(f"log_storage | get_log_path_failed | error={e}")
         return None

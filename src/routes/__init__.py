@@ -1,5 +1,7 @@
 from flask import request, jsonify, render_template
 from src.routes.webhook import process_webhook
+from logger.context import set_request_context, clear_request_context
+import uuid
 
 
 def register_routes(app):
@@ -97,11 +99,11 @@ def register_routes(app):
                         html_content = f.read()
                     report_data = parse_health_check_report(html_content)
                     if report_data:
-                        app_logger.info(f"巡检报告解析成功: 正常={report_data['ok_count']}, 警告={report_data['warning_count']}, 严重={report_data['critical_count']}")
+                        app_logger.info(f"route | parse_report | ok={report_data['ok_count']}, warning={report_data['warning_count']}, critical={report_data['critical_count']}")
                     else:
-                        app_logger.warning("巡检报告解析返回空结果")
+                        app_logger.warning("route | parse_report | result=empty")
                 except Exception as e:
-                    app_logger.error(f"解析巡检报告失败: {str(e)}")
+                    app_logger.error(f"route | parse_report_failed | error={e}")
 
                 card_elements, card_template = build_inspection_card_elements(
                     report_data, presigned_url, file_size_mb, report_path
@@ -134,17 +136,17 @@ def register_routes(app):
                     try:
                         result = send_notification(route_name, feishu_card_message, chat_id=chat_id)
                         if result.get('success'):
-                            app_logger.info(f"IT报告通知发送成功: method={result.get('method')}")
+                            app_logger.info(f"route | it_report_sent | method={result.get('method')}")
                         else:
-                            app_logger.error(f"IT报告通知发送失败")
+                            app_logger.error("route | it_report_send_failed")
                     except Exception as e:
-                        app_logger.error(f"❌ 飞书消息发送失败: {str(e)}")
+                        app_logger.error(f"route | feishu_send_failed | error={e}")
                 else:
-                    app_logger.warning(f"⚠️ 未发送飞书消息: presigned_url={presigned_url}")
+                    app_logger.warning("route | feishu_send_skipped | reason=no_presigned_url")
 
                 
             except Exception as e:
-                app_logger.error(f"生成预签名URL失败: {str(e)}")
+                app_logger.error(f"route | presigned_url_failed | error={e}")
                 presigned_url = None
             
             # 返回成功响应，包含预签名URL
@@ -261,7 +263,7 @@ def register_routes(app):
                     version = 'v2 (array format)'
                     alerts = data
                     app_logger.info(
-                        f"收到 Alertmanager {version} 告警事件, alerts_count={len(alerts)}"
+                        f"route | alertmanager_event | version={version}, alerts_count={len(alerts)}"
                     )
                     
                     for alert in alerts:
@@ -269,8 +271,7 @@ def register_routes(app):
                             alert_status = alert.get('status', '')
                             alert_name = alert.get('labels', {}).get('alertname', 'unknown') if isinstance(alert.get('labels'), dict) else 'unknown'
                             app_logger.info(
-                                f"告警: {alert_name}, status={alert_status}, "
-                                f"startsAt={alert.get('startsAt')}, endsAt={alert.get('endsAt')}"
+                                f"route | alert | name={alert_name}, status={alert_status}, startsAt={alert.get('startsAt')}, endsAt={alert.get('endsAt')}"
                             )
                 else:
                     version = data.get('version', 'v1')
@@ -280,28 +281,24 @@ def register_routes(app):
                     alerts = data.get('alerts', [])
                     
                     app_logger.info(
-                        f"收到 Alertmanager {version} 告警事件: "
-                        f"groupKey={group_key}, status={status}, receiver={receiver}, alerts_count={len(alerts)}"
+                        f"route | alertmanager_event | version={version}, groupKey={group_key}, status={status}, receiver={receiver}, alerts_count={len(alerts)}"
                     )
                     
                     for alert in alerts:
                         alert_status = alert.get('status', '')
                         alert_name = alert.get('labels', {}).get('alertname', 'unknown') if isinstance(alert.get('labels'), dict) else 'unknown'
                         app_logger.info(
-                            f"告警: {alert_name}, status={alert_status}, "
-                            f"startsAt={alert.get('startsAt')}, endsAt={alert.get('endsAt')}"
+                            f"route | alert | name={alert_name}, status={alert_status}, startsAt={alert.get('startsAt')}, endsAt={alert.get('endsAt')}"
                         )
                     
             except json.JSONDecodeError:
-                app_logger.warning(f"收到无效的JSON请求体: {request_body[:200]}")
+                app_logger.warning(f"route | invalid_json | body_preview={request_body[:200]}")
             
             return jsonify({'status': 'success'}), 200
             
         except Exception as e:
-            app_logger.error(f"处理 /monitor/event/api/v2/alerts 请求失败: {str(e)}")
-            import traceback
-            app_logger.error(traceback.format_exc())
-            
+            app_logger.error(f"route | monitor_v2_failed | error={e}")
+
             try:
                 monitor_logger.log_event(
                     route_name='monitor/event/api/v2/alerts',
@@ -359,7 +356,7 @@ def register_routes(app):
 
             records_list = db_records if db_records else memory_records
         except Exception as e:
-            app_logger.error(f"获取流水线记录失败: {str(e)}")
+            app_logger.error(f"route | get_pipeline_records_failed | error={e}")
             with pipeline_records_lock:
                 records_list = list(pipeline_records.values())
 
@@ -370,7 +367,7 @@ def register_routes(app):
             ]
 
             if not records_list:
-                app_logger.info(f"未找到命名空间 {namespace} 的记录")
+                app_logger.info(f"route | no_records | namespace={namespace}")
                 return render_template('no_records.html', namespace=namespace)
         
         # 排序：先按record_time降序，无record_time的按project_name升序
@@ -406,7 +403,7 @@ def register_routes(app):
         
         records_list.sort(key=get_sort_key)
         
-        app_logger.info(f"生成的HTML页面包含 {len(records_list)} 条记录")
+        app_logger.info(f"route | pipeline_records_view | count={len(records_list)}")
         return render_template('base.html', records=records_list)
     
     @app.route('/pipelines/records/json')
@@ -496,7 +493,6 @@ def register_routes(app):
         from src.services import push_records, push_records_lock
         from src.services.database import PushRecordDB
         import json
-        import logging
 
         try:
             subpath_filter = request.args.get('subpath')
@@ -541,6 +537,13 @@ def register_routes(app):
                                         else:
                                             deploy_ips.append(ip)
 
+                            commit_deploy_ip = commit.get('deploy_ip')
+                            if commit_deploy_ip:
+                                if isinstance(commit_deploy_ip, list):
+                                    deploy_ips.extend(commit_deploy_ip)
+                                else:
+                                    deploy_ips.append(commit_deploy_ip)
+
                             deploy_ips = list(set(deploy_ips))
 
                             if commit.get('pipeline_iid') and deploy_ips:
@@ -570,9 +573,7 @@ def register_routes(app):
                 'count': len(cd_records)
             }), 200
         except Exception as e:
-            logging.error(f"获取CD记录失败: {str(e)}")
-            import traceback
-            logging.error(traceback.format_exc())
+            app_logger.error(f"route | get_cd_records_failed | error={e}")
 
             return jsonify({
                 'status': 'error',
@@ -631,14 +632,11 @@ def register_routes(app):
 
     @app.route('/api/feishu/card-action', methods=['POST'])
     def feishu_card_action_route():
-        """
-        处理飞书卡片动作回调
-        当用户点击卡片中的 callback 按钮时，飞书会向此端点发送回调请求
-        """
         import json
         try:
             data = request.get_json(force=True)
-            app_logger.info(f"收到飞书卡片动作回调: {json.dumps(data, ensure_ascii=False)[:500]}")
+            set_request_context(request_id=uuid.uuid4().hex[:8], route_name='feishu/card-action')
+            app_logger.info(f"feishu | card_action | data={json.dumps(data, ensure_ascii=False)[:200]}")
 
             if data.get('type') == 'url_verification':
                 return jsonify({"challenge": data.get('challenge')})
@@ -652,8 +650,10 @@ def register_routes(app):
                 return jsonify({})
 
         except Exception as e:
-            app_logger.error(f"处理飞书卡片动作回调失败: {str(e)}")
+            app_logger.error(f"feishu | card_action_failed | error={e}")
             return jsonify({})
+        finally:
+            clear_request_context()
 
     @app.route('/api/build-logs/<path:project>/<int:pipeline_iid>/download', methods=['GET'])
     def download_build_logs_api(project, pipeline_iid):

@@ -48,7 +48,7 @@ def find_last_error(lines: List[str]) -> int:
 
         for pattern in compiled_patterns:
             if pattern.search(line):
-                app_logger.debug(f"在行 {i} 找到错误模式: {line.strip()[:80]}")
+                app_logger.debug(f"log_parser | find_error | line={i}, pattern={line.strip()[:80]}")
                 return i
 
     return -1
@@ -90,7 +90,7 @@ def parse_error_from_logs(log_content: str, context_lines: Optional[int] = None)
     error_index = find_last_error(lines)
 
     if error_index == -1:
-        app_logger.info("未找到明确的错误模式，使用最后 20 行作为摘要")
+        app_logger.info("log_parser | no_error_pattern | fallback=last_20_lines")
         fallback_lines = lines[-20:] if len(lines) > 20 else lines
         return {
             'summary': summary,
@@ -110,7 +110,7 @@ def parse_error_from_logs(log_content: str, context_lines: Optional[int] = None)
 
     last_error_context = f"...\n" + error_detail + "\n..."
 
-    app_logger.info(f"成功解析错误: {error_line.strip()[:80] if error_line else 'N/A'}")
+    app_logger.info(f"log_parser | parse_result | error_line={error_line.strip()[:80] if error_line else '-'}")
 
     return {
         'summary': summary,

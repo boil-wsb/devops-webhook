@@ -63,12 +63,12 @@ def send_long_build_alert(build_info, route_name):
         chat_id = ROUTE_CHAT_ID_MAP.get(route_name) or build_info.get('chat_id')
         result = send_notification(route_name, long_build_message, chat_id=chat_id)
         if result.get('success'):
-            app_logger.info(f"已发送构建超时告警: {build_info['pipeline_iid']}，使用路由: {route_name}, method={result.get('method')}")
+            app_logger.info(f"build_monitor | timeout_alert_sent | pipeline_iid={build_info['pipeline_iid']}, route={route_name}, method={result.get('method')}")
         else:
-            app_logger.error(f"发送构建超时告警失败: {build_info['pipeline_iid']}")
+            app_logger.error(f"build_monitor | timeout_alert_failed | pipeline_iid={build_info['pipeline_iid']}")
         
     except Exception as e:
-            app_logger.error(f"发送构建超时告警失败: {str(e)}")
+            app_logger.error(f"build_monitor | timeout_alert_failed | error={e}")
 
 
 def check_long_running_builds(running_builds, running_builds_lock):
@@ -92,11 +92,11 @@ def check_long_running_builds(running_builds, running_builds_lock):
                 # 只有当运行中构建数量大于0时，才打印日志
                 if build_count > 0:
                     # 打印当前running_builds的内容，用于调试
-                    app_logger.debug(f"📊 当前运行中构建数量: {build_count}")
+                    app_logger.debug(f"build_monitor | check | running_count={build_count}")
                     for pipeline_iid, build_info in running_builds.items():
-                        app_logger.debug(f"🔍 检查构建: {pipeline_iid}, 开始时间: {build_info['start_time']}")
+                        app_logger.debug(f"build_monitor | check_build | pipeline_iid={pipeline_iid}, start_time={build_info['start_time']}")
                         elapsed_time = (current_time - build_info['start_time']).total_seconds()
-                        app_logger.debug(f"⏱️  已运行时间: {elapsed_time} 秒")
+                        app_logger.debug(f"build_monitor | check_build | elapsed_seconds={elapsed_time}")
                         
                         # 检查项目是否在跳过超时检查列表中，或者commit_url是否包含跳过关键词
                         commit_url = build_info.get('commit_url', '')
@@ -104,12 +104,12 @@ def check_long_running_builds(running_builds, running_builds_lock):
                         
                         if build_info['project_name'] in SKIP_TIMEOUT_CHECK:
                             should_skip = True
-                            app_logger.debug(f"⏱️  项目 {build_info['project_name']} 在跳过超时检查列表中，跳过本次检查")
+                            app_logger.debug(f"build_monitor | check_build | project={build_info['project_name']}, skipped=true")
                         elif any(skip_keyword in commit_url for skip_keyword in SKIP_TIMEOUT_CHECK):
                             should_skip = True
                             for skip_keyword in SKIP_TIMEOUT_CHECK:
                                 if skip_keyword in commit_url:
-                                    app_logger.debug(f"⏱️  commit_url 包含 '{skip_keyword}' 在跳过超时检查列表中，跳过本次检查")
+                                    app_logger.debug(f"build_monitor | check_build | commit_url_contains={skip_keyword}, skipped=true")
                                     break
                         
                         if not should_skip:
@@ -118,27 +118,27 @@ def check_long_running_builds(running_builds, running_builds_lock):
                             
                             if elapsed_time > timeout_seconds:
                                 # 发送超时告警
-                                app_logger.warning(f"🚨 构建超时，发送告警: {pipeline_iid}")
+                                app_logger.warning(f"build_monitor | timeout_alert | pipeline_iid={pipeline_iid}")
                                 # 从构建信息中获取route_name
                                 build_route_name = build_info.get('route_name', '')
                                 send_long_build_alert(build_info, build_route_name)
                                 # 标记为需要移除
                                 builds_to_remove.append(pipeline_iid)
                             else:
-                                app_logger.debug(f"⏱️  构建 {pipeline_iid} 已运行 {elapsed_time} 秒，未超过配置的超时时间 {timeout_seconds} 秒")
+                                app_logger.debug(f"build_monitor | check_build | pipeline_iid={pipeline_iid}, elapsed_seconds={elapsed_time}, timeout={timeout_seconds}, exceeded=false")
             
             # 移除已经处理超时告警的构建
             with running_builds_lock:
                 for pipeline_iid in builds_to_remove:
                     if pipeline_iid in running_builds:
                         del running_builds[pipeline_iid]
-                        app_logger.info(f"已移除超时构建记录: {pipeline_iid}")
+                        app_logger.info(f"build_monitor | remove_timeout_build | pipeline_iid={pipeline_iid}")
             
             # 每30秒检查一次
             time.sleep(60)
             
         except Exception as e:
-            app_logger.error(f"检查运行中构建时发生错误: {str(e)}")
+            app_logger.error(f"build_monitor | check_failed | error={e}")
             time.sleep(30)
 
 
@@ -153,4 +153,4 @@ def start_build_monitor_thread(running_builds, running_builds_lock):
     app_logger = logging.getLogger('app_logger')
     monitor_thread = threading.Thread(target=check_long_running_builds, args=(running_builds, running_builds_lock), daemon=True)
     monitor_thread.start()
-    app_logger.info("构建监控线程已启动")
+    app_logger.info("build_monitor | thread_started")

@@ -94,9 +94,9 @@ def _load_records_from_files():
                 project_data = json.load(f)
             with pipeline_records_lock:
                 pipeline_records.update(project_data)
-            app_logger.info(f"已从project.json加载 {len(project_data)} 条流水线记录")
+            app_logger.info(f"service | load_project_json | count={len(project_data)}")
         except Exception as e:
-            app_logger.error(f"加载project.json时发生错误: {str(e)}")
+            app_logger.error(f"service | load_project_json_failed | error={e}")
 
     if os.path.exists('push_records.json'):
         try:
@@ -105,9 +105,9 @@ def _load_records_from_files():
             with push_records_lock:
                 push_records.clear()
                 push_records.extend(loaded_records)
-            app_logger.info(f"已从push_records.json加载 {len(push_records)} 条push事件记录")
+            app_logger.info(f"service | load_push_records_json | count={len(push_records)}")
         except Exception as e:
-            app_logger.error(f"加载push_records.json时发生错误: {str(e)}")
+            app_logger.error(f"service | load_push_records_json_failed | error={e}")
 
 
 def _load_records_from_db():
@@ -123,7 +123,7 @@ def _load_records_from_db():
         db_path = config.get('db_path', 'webhook.db')
 
         if not os.path.exists(db_path):
-            app_logger.info("数据库文件不存在，将使用 JSON 文件")
+            app_logger.info("service | db_not_found | fallback=json")
             return False
 
         init_database()
@@ -135,7 +135,7 @@ def _load_records_from_db():
                     if record.get('commits') and isinstance(record['commits'], str):
                         record['commits'] = json.loads(record['commits'])
                 push_records.extend(db_push_records)
-            app_logger.info(f"已从数据库加载 {len(db_push_records)} 条 push 记录")
+            app_logger.info(f"service | load_push_from_db | count={len(db_push_records)}")
 
         db_pipeline_records = PipelineRecordDB.get_all()
         if db_pipeline_records:
@@ -144,11 +144,11 @@ def _load_records_from_db():
                     key = record.get('path_with_namespace')
                     if key:
                         pipeline_records[key] = record
-            app_logger.info(f"已从数据库加载 {len(db_pipeline_records)} 条 pipeline 记录")
+            app_logger.info(f"service | load_pipeline_from_db | count={len(db_pipeline_records)}")
 
         return len(db_push_records) > 0 or len(db_pipeline_records) > 0
     except Exception as e:
-        app_logger.error(f"从数据库加载记录失败: {str(e)}")
+        app_logger.error(f"service | load_db_records_failed | error={e}")
         return False
 
 
@@ -166,7 +166,7 @@ def _initialize_data():
         cleanup_old_records()
         start_cleanup_thread()
     except Exception as e:
-        app_logger.error(f"启动数据库清理任务失败: {str(e)}")
+        app_logger.error(f"service | db_cleanup_start_failed | error={e}")
 
 
 _initialize_data()

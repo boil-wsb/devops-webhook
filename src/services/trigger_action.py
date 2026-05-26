@@ -54,11 +54,11 @@ def _execute_ssh(action, path_with_namespace, ref, project_name):
     variables = action.get('variables', {})
 
     if not all([host, user, password]):
-        logger.error(f"触发动作 [{name}] SSH 配置不完整，跳过执行")
+        logger.error(f"trigger_action | ssh_config_incomplete | action={name}")
         return
 
     if not script_name and not ssh_command:
-        logger.error(f"触发动作 [{name}] 未配置 script 或 ssh_command，跳过执行")
+        logger.error(f"trigger_action | no_command | action={name}")
         return
 
     env_prefix = _build_env_prefix(variables, path_with_namespace, ref, project_name)
@@ -66,20 +66,20 @@ def _execute_ssh(action, path_with_namespace, ref, project_name):
     client = paramiko.SSHClient()
     client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
     try:
-        logger.info(f"触发动作 [{name}] 正在连接 {user}@{host}:{port} ...")
+        logger.info(f"trigger_action | ssh_connect | action={name}, host={host}:{port}")
         client.connect(hostname=host, port=port, username=user, password=password, timeout=30)
 
         if script_name:
             script_path = os.path.normpath(os.path.join(SCRIPTS_DIR, script_name))
             if not os.path.exists(script_path):
-                logger.error(f"触发动作 [{name}] 脚本文件不存在: {script_path}")
+                logger.error(f"trigger_action | script_not_found | action={name}, path={script_path}")
                 return
 
             remote_script = f"/tmp/_trigger_{name}_{os.getpid()}.sh"
             sftp = client.open_sftp()
             try:
                 sftp.put(script_path, remote_script)
-                logger.info(f"触发动作 [{name}] 已上传脚本 {script_name} -> {remote_script}")
+                logger.info(f"trigger_action | script_uploaded | action={name}, script={script_name}")
             finally:
                 sftp.close()
 
@@ -87,7 +87,7 @@ def _execute_ssh(action, path_with_namespace, ref, project_name):
         else:
             command = f"{env_prefix} bash -c {_shell_quote(ssh_command)}"
 
-        logger.info(f"触发动作 [{name}] 执行命令: {command}")
+        logger.info(f"trigger_action | execute | action={name}, host={host}")
         stdin, stdout, stderr = client.exec_command(command)
         exit_code = stdout.channel.recv_exit_status()
         output = stdout.read().decode('utf-8', errors='replace')
@@ -95,27 +95,27 @@ def _execute_ssh(action, path_with_namespace, ref, project_name):
 
         success = exit_code == 0
         if success:
-            logger.info(f"触发动作 [{name}] 执行成功 (exit_code={exit_code})")
+            logger.info(f"trigger_action | execute_success | action={name}, exit_code={exit_code}")
             if output.strip():
-                logger.info(f"触发动作 [{name}] 输出:\n{output.strip()}")
+                logger.info(f"trigger_action | output | action={name}, output_len={len(output.strip())}")
         else:
-            logger.error(f"触发动作 [{name}] 执行失败 (exit_code={exit_code})")
+            logger.error(f"trigger_action | execute_failed | action={name}, exit_code={exit_code}")
             if error_output.strip():
-                logger.error(f"触发动作 [{name}] 错误输出:\n{error_output.strip()}")
+                logger.error(f"trigger_action | error_output | action={name}, output_len={len(error_output.strip())}")
             if output.strip():
-                logger.info(f"触发动作 [{name}] 标准输出:\n{output.strip()}")
+                logger.info(f"trigger_action | stdout | action={name}, output_len={len(output.strip())}")
             if script_name:
                 client.exec_command(f"rm -f {remote_script}")
 
         _notify_result(name, project_name, ref, success, output, error_output, exit_code, host, variables)
     except paramiko.AuthenticationException:
-        logger.error(f"触发动作 [{name}] SSH 认证失败: {user}@{host}:{port}")
+        logger.error(f"trigger_action | ssh_auth_failed | action={name}, host={host}:{port}")
         _notify_result(name, project_name, ref, False, '', f'SSH 认证失败: {user}@{host}:{port}', None, host, variables)
     except paramiko.SSHException as e:
-        logger.error(f"触发动作 [{name}] SSH 连接异常: {str(e)}")
-        _notify_result(name, project_name, ref, False, '', f'SSH 连接异常: {str(e)}', None, host, variables)
+        logger.error(f"trigger_action | ssh_exception | action={name}, error={e}")
+        _notify_result(name, project_name, ref, False, '', f'SSH 连接异常: {e}', None, host, variables)
     except Exception as e:
-        logger.error(f"触发动作 [{name}] 执行异常: {str(e)}")
+        logger.error(f"trigger_action | execute_exception | action={name}, error={e}")
         _notify_result(name, project_name, ref, False, '', str(e), None, host, variables)
     finally:
         client.close()
@@ -126,7 +126,7 @@ def _notify_result(action_name, project_name, ref, success, output='', error_out
         from src.services.feishu_notify import send_action_result
         send_action_result(action_name, project_name, ref, success, output, error_output, exit_code, ssh_host, variables)
     except Exception as e:
-        logger.error(f"发送飞书通知异常: {str(e)}")
+        logger.error(f"trigger_action | notify_failed | error={e}")
 
 
 def check_and_trigger(path_with_namespace, ref, project_name=''):
@@ -142,6 +142,6 @@ def check_and_trigger(path_with_namespace, ref, project_name=''):
 
     for action in matched:
         name = action.get('name', 'unknown')
-        logger.info(f"触发动作 [{name}] 条件匹配: project={path_with_namespace}, projectName={project_name}, ref={ref}")
+        logger.info(f"trigger_action | condition_match | action={name}, project={project_name}, ref={ref}")
         thread = threading.Thread(target=_execute_ssh, args=(action, path_with_namespace, ref, project_name), daemon=True)
         thread.start()

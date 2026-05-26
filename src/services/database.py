@@ -37,11 +37,11 @@ def close_all_connections():
         for conn in _connections_registry.copy():
             try:
                 conn.close()
-                app_logger.debug(f"已关闭数据库连接: {id(conn)}")
+                app_logger.debug(f"database | close_connection | conn_id={id(conn)}")
             except Exception as e:
-                app_logger.warning(f"关闭数据库连接失败: {e}")
+                app_logger.warning(f"database | close_connection_failed | error={e}")
         _connections_registry.clear()
-    app_logger.info("所有数据库连接已关闭")
+    app_logger.info("database | all_connections_closed")
 
 
 def _register_atexit():
@@ -169,7 +169,7 @@ def init_database():
 
         # app_logger.info("数据库初始化完成")
     except Exception as e:
-        app_logger.error(f"数据库初始化失败: {str(e)}")
+        app_logger.error(f"database | init_failed | error={e}")
         raise
 
 
@@ -194,10 +194,10 @@ def cleanup_old_records():
 
             deleted_pipeline = cursor.rowcount
 
-        app_logger.info(f"数据清理完成: push_records={deleted_push}, pipeline_records={deleted_pipeline}")
+        app_logger.info(f"database | cleanup | deleted_push={deleted_push}, deleted_pipeline={deleted_pipeline}")
         return deleted_push, deleted_pipeline
     except Exception as e:
-        app_logger.error(f"数据清理失败: {str(e)}")
+        app_logger.error(f"database | cleanup_failed | error={e}")
         return 0, 0
 
 
@@ -216,12 +216,12 @@ def start_cleanup_thread():
                 else:
                     time.sleep(1800)
             except Exception as e:
-                app_logger.error(f"清理线程异常: {str(e)}")
+                app_logger.error(f"database | cleanup_thread_failed | error={e}")
                 time.sleep(1800)
 
     thread = threading.Thread(target=cleanup_loop, daemon=True)
     thread.start()
-    app_logger.info("数据清理线程已启动")
+    app_logger.info("database | cleanup_thread_started")
 
 
 class PushRecordDB:
@@ -240,7 +240,7 @@ class PushRecordDB:
                       json.dumps(commits, ensure_ascii=False) if commits else None))
                 return cursor.lastrowid
         except Exception as e:
-            app_logger.error(f"插入 push 记录失败: {str(e)}")
+            app_logger.error(f"database | insert_push_failed | error={e}")
             return None
 
     @staticmethod
@@ -252,7 +252,7 @@ class PushRecordDB:
                 rows = cursor.fetchall()
                 return [dict(row) for row in rows]
         except Exception as e:
-            app_logger.error(f"获取 push 记录失败: {str(e)}")
+            app_logger.error(f"database | get_push_failed | error={e}")
             return []
 
     @staticmethod
@@ -269,7 +269,7 @@ class PushRecordDB:
                 rows = cursor.fetchall()
                 return [dict(row) for row in rows]
         except Exception as e:
-            app_logger.error(f"获取 push 记录失败: {str(e)}")
+            app_logger.error(f"database | get_push_failed | error={e}")
             return []
 
     @staticmethod
@@ -295,7 +295,7 @@ class PushRecordDB:
                 rows = cursor.fetchall()
                 return [dict(row) for row in rows]
         except Exception as e:
-            app_logger.error(f"获取 CD 记录失败: {str(e)}")
+            app_logger.error(f"database | get_cd_records_failed | error={e}")
             return []
 
     @staticmethod
@@ -303,6 +303,27 @@ class PushRecordDB:
                                     deploy_ip, stages, subpath):
         """更新 push 记录中 commit 的 pipeline 信息"""
         try:
+            if deploy_ip and stages:
+                ip_list = deploy_ip if isinstance(deploy_ip, list) else [deploy_ip]
+                has_deploy_ip_in_stages = any(
+                    isinstance(s, dict) and s.get('deploy_ip')
+                    for s in stages
+                )
+                if not has_deploy_ip_in_stages:
+                    deploy_stage = next(
+                        (s for s in stages if isinstance(s, dict) and s.get('stage', '').lower() == 'deploy'),
+                        None
+                    )
+                    if deploy_stage:
+                        deploy_stage['deploy_ip'] = ip_list
+                    else:
+                        stages.append({
+                            'stage': 'deploy',
+                            'name': 'deploy',
+                            'status': pipeline_status or 'success',
+                            'deploy_ip': ip_list
+                        })
+
             records = PushRecordDB.get_by_git_url(git_url)
             for record in records:
                 commits = json.loads(record['commits']) if record['commits'] else []
@@ -314,7 +335,32 @@ class PushRecordDB:
                         if deploy_ip:
                             commit['deploy_ip'] = deploy_ip if isinstance(deploy_ip, list) else [deploy_ip]
                         if stages:
-                            commit['stages'] = stages
+                            existing_stages = commit.get('stages', [])
+                            if existing_stages and isinstance(existing_stages, list):
+                                for new_stage in stages:
+                                    stage_name = new_stage.get('stage', '')
+                                    job_name = new_stage.get('name', '')
+                                    matched = False
+                                    for existing_stage in existing_stages:
+                                        if (existing_stage.get('stage') == stage_name
+                                                and existing_stage.get('name') == job_name):
+                                            existing_stage['status'] = new_stage.get('status', existing_stage.get('status'))
+                                            new_deploy_ip = new_stage.get('deploy_ip', [])
+                                            if new_deploy_ip:
+                                                existing_deploy_ip = existing_stage.get('deploy_ip', [])
+                                                if not isinstance(existing_deploy_ip, list):
+                                                    existing_deploy_ip = [existing_deploy_ip] if existing_deploy_ip else []
+                                                for ip in new_deploy_ip:
+                                                    if ip not in existing_deploy_ip:
+                                                        existing_deploy_ip.append(ip)
+                                                existing_stage['deploy_ip'] = existing_deploy_ip
+                                            matched = True
+                                            break
+                                    if not matched:
+                                        existing_stages.append(new_stage)
+                                commit['stages'] = existing_stages
+                            else:
+                                commit['stages'] = stages
                         updated = True
                         break
 
@@ -327,7 +373,7 @@ class PushRecordDB:
                         ''', (json.dumps(commits, ensure_ascii=False), subpath, record['id']))
                     break
         except Exception as e:
-            app_logger.error(f"更新 push 记录失败: {str(e)}")
+            app_logger.error(f"database | update_push_failed | error={e}")
 
     @staticmethod
     def batch_insert(records):
@@ -346,7 +392,7 @@ class PushRecordDB:
                 ''', data)
                 return cursor.rowcount
         except Exception as e:
-            app_logger.error(f"批量插入 push 记录失败: {str(e)}")
+            app_logger.error(f"database | batch_insert_push_failed | error={e}")
             return 0
 
     @staticmethod
@@ -357,7 +403,7 @@ class PushRecordDB:
                 cursor.execute('SELECT COUNT(*) as count FROM push_records')
                 return cursor.fetchone()['count']
         except Exception as e:
-            app_logger.error(f"获取 push 记录总数失败: {str(e)}")
+            app_logger.error(f"database | get_push_count_failed | error={e}")
             return 0
 
 
@@ -394,7 +440,7 @@ class PipelineRecordDB:
                       record_time, branch, commit_url))
                 return True
         except Exception as e:
-            app_logger.error(f"插入/更新 pipeline 记录失败: {str(e)}")
+            app_logger.error(f"database | upsert_pipeline_failed | error={e}")
             return False
 
     @staticmethod
@@ -406,7 +452,7 @@ class PipelineRecordDB:
                 rows = cursor.fetchall()
                 return [dict(row) for row in rows]
         except Exception as e:
-            app_logger.error(f"获取 pipeline 记录失败: {str(e)}")
+            app_logger.error(f"database | get_pipeline_failed | error={e}")
             return []
 
     @staticmethod
@@ -422,7 +468,7 @@ class PipelineRecordDB:
                 rows = cursor.fetchall()
                 return [dict(row) for row in rows]
         except Exception as e:
-            app_logger.error(f"获取 pipeline 记录失败: {str(e)}")
+            app_logger.error(f"database | get_pipeline_failed | error={e}")
             return []
 
     @staticmethod
@@ -454,7 +500,7 @@ class PipelineRecordDB:
                           r.get('branch'), r.get('commit_url')))
                 return True
         except Exception as e:
-            app_logger.error(f"批量插入/更新 pipeline 记录失败: {str(e)}")
+            app_logger.error(f"database | batch_upsert_pipeline_failed | error={e}")
             return False
 
     @staticmethod
@@ -465,7 +511,7 @@ class PipelineRecordDB:
                 cursor.execute('SELECT COUNT(*) as count FROM pipeline_records')
                 return cursor.fetchone()['count']
         except Exception as e:
-            app_logger.error(f"获取 pipeline 记录总数失败: {str(e)}")
+            app_logger.error(f"database | get_pipeline_count_failed | error={e}")
             return 0
 
 
@@ -483,7 +529,7 @@ class MigrationHistoryDB:
                 ''', (source_file, records_migrated))
                 return cursor.lastrowid
         except Exception as e:
-            app_logger.error(f"记录迁移历史失败: {str(e)}")
+            app_logger.error(f"database | record_migration_failed | error={e}")
             return None
 
     @staticmethod
@@ -495,5 +541,5 @@ class MigrationHistoryDB:
                 rows = cursor.fetchall()
                 return [dict(row) for row in rows]
         except Exception as e:
-            app_logger.error(f"获取迁移历史失败: {str(e)}")
+            app_logger.error(f"database | get_migration_history_failed | error={e}")
             return []

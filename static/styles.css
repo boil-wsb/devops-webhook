@@ -1300,7 +1300,6 @@ p {
     background-color: var(--card-bg);
     border-radius: var(--radius-xl);
     box-shadow: var(--shadow-lg);
-    overflow: hidden;
     animation: fadeIn 0.5s ease-out;
 }
 
@@ -1308,12 +1307,25 @@ p {
     padding: var(--space-6);
 }
 
+.table-footer {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-top: var(--space-4);
+    flex-wrap: wrap;
+    gap: var(--space-3);
+}
+
 .total-records {
-    text-align: center;
-    margin-bottom: var(--space-4);
+    text-align: left;
+    margin-bottom: 0;
     color: var(--text-secondary);
     font-size: 0.875rem;
     font-weight: 500;
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+    flex-wrap: wrap;
 }
 
 /* Records Table */
@@ -1329,24 +1341,6 @@ p {
     table-layout: fixed;
     border: 1px solid var(--border-color);
 }
-
-/* Table Column Widths */
-.records-table th:nth-child(1),
-.records-table td:nth-child(1) { width: 160px; }
-.records-table th:nth-child(2),
-.records-table td:nth-child(2) { width: 140px; }
-.records-table th:nth-child(3),
-.records-table td:nth-child(3) { width: 110px; }
-.records-table th:nth-child(4),
-.records-table td:nth-child(4) { width: 90px; }
-.records-table th:nth-child(5),
-.records-table td:nth-child(5) { width: 150px; }
-.records-table th:nth-child(6),
-.records-table td:nth-child(6) { width: 90px; }
-.records-table th:nth-child(7),
-.records-table td:nth-child(7) { width: 120px; }
-.records-table th:nth-child(8),
-.records-table td:nth-child(8) { width: auto; }
 
 .records-table th,
 .records-table td {
@@ -1367,6 +1361,7 @@ p {
     white-space: nowrap;
     transition: all var(--transition-fast);
     user-select: none;
+    padding-right: 14px;
 }
 
 [data-theme="dark"] .records-table th {
@@ -2155,4 +2150,166 @@ p {
 
 [data-theme="dark"] #errorSummaryContent {
     color: var(--error-300);
+}
+
+/* ============================================
+   23. Combobox Component
+   ============================================ */
+.combobox {
+    position: relative;
+    min-width: 160px;
+}
+
+.combobox-input {
+    width: 100%;
+    padding: var(--space-2) var(--space-6) var(--space-2) var(--space-3);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-md);
+    font-size: 0.875rem;
+    background-color: var(--bg-color);
+    color: var(--text-color);
+    box-shadow: var(--shadow-xs);
+    transition: all var(--transition-fast);
+    outline: none;
+}
+
+.combobox-input:focus {
+    border-color: var(--primary-400);
+    box-shadow: 0 0 0 3px var(--primary-100);
+}
+
+[data-theme="dark"] .combobox-input:focus {
+    box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.2);
+}
+
+.combobox-input:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+    background-color: var(--gray-100);
+}
+
+[data-theme="dark"] .combobox-input:disabled {
+    background-color: var(--gray-700);
+}
+
+.combobox.disabled {
+    opacity: 0.6;
+    pointer-events: none;
+}
+
+.combobox-toggle {
+    position: absolute;
+    right: 4px;
+    top: 50%;
+    transform: translateY(-50%);
+    background: none;
+    border: none;
+    padding: 4px;
+    cursor: pointer;
+    color: var(--text-secondary);
+    display: flex;
+    align-items: center;
+    transition: color var(--transition-fast);
+}
+
+.combobox-toggle:hover {
+    color: var(--text-color);
+}
+
+.combobox-dropdown {
+    position: absolute;
+    top: calc(100% + 4px);
+    left: 0;
+    right: 0;
+    background-color: var(--card-bg);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-md);
+    box-shadow: var(--shadow-lg);
+    max-height: 240px;
+    overflow-y: auto;
+    z-index: 1000;
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity var(--transition-fast);
+}
+
+.combobox-dropdown.show {
+    opacity: 1;
+    pointer-events: auto;
+}
+
+.combobox-dropdown::-webkit-scrollbar {
+    width: 6px;
+}
+
+.combobox-dropdown::-webkit-scrollbar-track {
+    background: var(--gray-100);
+    border-radius: var(--radius-full);
+}
+
+.combobox-dropdown::-webkit-scrollbar-thumb {
+    background: var(--gray-300);
+    border-radius: var(--radius-full);
+}
+
+[data-theme="dark"] .combobox-dropdown::-webkit-scrollbar-track {
+    background: var(--gray-700);
+}
+
+[data-theme="dark"] .combobox-dropdown::-webkit-scrollbar-thumb {
+    background: var(--gray-500);
+}
+
+.combobox-option {
+    padding: var(--space-2) var(--space-3);
+    font-size: 0.875rem;
+    cursor: pointer;
+    transition: background-color var(--transition-fast);
+    color: var(--text-color);
+}
+
+.combobox-option:hover,
+.combobox-option.highlighted {
+    background-color: var(--primary-50);
+    color: var(--primary-700);
+}
+
+[data-theme="dark"] .combobox-option:hover,
+[data-theme="dark"] .combobox-option.highlighted {
+    background-color: rgba(59, 130, 246, 0.15);
+    color: var(--primary-300);
+}
+
+.combobox-dropdown.no-results::after {
+    content: '无匹配项';
+    display: block;
+    padding: var(--space-3);
+    text-align: center;
+    color: var(--text-tertiary);
+    font-size: 0.8125rem;
+}
+
+/* ============================================
+   24. Column Resize Handle
+   ============================================ */
+.resize-handle {
+    position: absolute;
+    right: 0;
+    top: 0;
+    bottom: 0;
+    width: 6px;
+    cursor: col-resize;
+    background: transparent;
+    transition: background-color var(--transition-fast);
+    z-index: 1;
+}
+
+.resize-handle:hover,
+.resize-handle.active {
+    background-color: var(--primary-300);
+}
+
+[data-theme="dark"] .resize-handle:hover,
+[data-theme="dark"] .resize-handle.active {
+    background-color: var(--primary-500);
 }

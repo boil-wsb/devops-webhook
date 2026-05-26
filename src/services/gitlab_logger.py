@@ -31,7 +31,7 @@ def get_job_logs(project_id: int, job_id: int, max_lines: int = 100) -> Tuple[bo
     gitlab_url, private_token = get_gitlab_config()
 
     if not gitlab_url or not private_token:
-        app_logger.warning("GitLab 配置不完整，无法获取日志")
+        app_logger.warning("gitlab | config_incomplete | reason=missing_config")
         return False, "GitLab 配置不完整"
 
     url = f"{gitlab_url.rstrip('/')}/api/v4/projects/{project_id}/jobs/{job_id}/trace"
@@ -49,19 +49,19 @@ def get_job_logs(project_id: int, job_id: int, max_lines: int = 100) -> Tuple[bo
         lines = full_log.split('\n')
         if len(lines) > max_lines:
             truncated_log = '\n'.join(lines[-max_lines:])
-            app_logger.info(f"日志已截取至最后 {max_lines} 行")
+            app_logger.info(f"gitlab | truncate_log | max_lines={max_lines}")
             return True, truncated_log
 
         return True, full_log
 
     except requests.exceptions.HTTPError as e:
-        app_logger.error(f"GitLab API HTTP 错误: {str(e)}")
-        return False, f"HTTP 错误: {str(e)}"
+        app_logger.error(f"gitlab | api_http_error | error={e}")
+        return False, f"HTTP 错误: {e}"
     except requests.exceptions.Timeout:
-        app_logger.error("GitLab API 请求超时")
+        app_logger.error("gitlab | api_timeout")
         return False, "请求超时"
     except Exception as e:
-        app_logger.error(f"获取 Job 日志失败: {str(e)}")
+        app_logger.error(f"gitlab | get_job_log_failed | error={e}")
         return False, str(e)
 
 
@@ -79,7 +79,7 @@ def get_failed_job_id(pipeline_id: int, project_id: int) -> Tuple[bool, int, str
     gitlab_url, private_token = get_gitlab_config()
 
     if not gitlab_url or not private_token:
-        app_logger.warning("GitLab 配置不完整，无法获取 Job ID")
+        app_logger.warning("gitlab | config_incomplete | reason=missing_config")
         return False, 0, "GitLab 配置不完整", ""
 
     url = f"{gitlab_url.rstrip('/')}/api/v4/projects/{project_id}/pipelines/{pipeline_id}/jobs"
@@ -98,20 +98,20 @@ def get_failed_job_id(pipeline_id: int, project_id: int) -> Tuple[bool, int, str
             if job.get('status') == 'failed':
                 job_id = job.get('id')
                 job_name = job.get('name', '')
-                app_logger.info(f"找到失败的 Job: {job_id}, 名称: {job_name}")
+                app_logger.info(f"gitlab | find_failed_job | job_id={job_id}, job_name={job_name}")
                 return True, job_id, "", job_name
 
-        app_logger.warning(f"Pipeline {pipeline_id} 中没有失败的 Job")
+        app_logger.warning(f"gitlab | find_failed_job | pipeline_id={pipeline_id}, result=none_found")
         return False, 0, "没有找到失败的 Job", ""
 
     except requests.exceptions.HTTPError as e:
-        app_logger.error(f"GitLab API HTTP 错误: {str(e)}")
-        return False, 0, f"HTTP 错误: {str(e)}", ""
+        app_logger.error(f"gitlab | api_http_error | error={e}")
+        return False, 0, f"HTTP 错误: {e}", ""
     except requests.exceptions.Timeout:
-        app_logger.error("GitLab API 请求超时")
+        app_logger.error("gitlab | api_timeout")
         return False, 0, "请求超时", ""
     except Exception as e:
-        app_logger.error(f"获取 Pipeline Jobs 失败: {str(e)}")
+        app_logger.error(f"gitlab | get_pipeline_jobs_failed | error={e}")
         return False, 0, str(e), ""
 
 
@@ -128,7 +128,7 @@ def get_project_id_by_name(project_path_with_namespace: str) -> Tuple[bool, int,
     gitlab_url, private_token = get_gitlab_config()
 
     if not gitlab_url or not private_token:
-        app_logger.warning("GitLab 配置不完整，无法获取项目 ID")
+        app_logger.warning("gitlab | config_incomplete | reason=missing_config")
         return False, 0, "GitLab 配置不完整"
 
     encoded_path = requests.utils.quote(project_path_with_namespace, safe='')
@@ -146,17 +146,17 @@ def get_project_id_by_name(project_path_with_namespace: str) -> Tuple[bool, int,
         project_id = project_data.get('id')
 
         if project_id:
-            app_logger.info(f"找到项目 {project_path_with_namespace}, ID: {project_id}")
+            app_logger.info(f"gitlab | find_project | project={project_path_with_namespace}, id={project_id}")
             return True, project_id, ""
 
         return False, 0, "项目 ID 未找到"
 
     except requests.exceptions.HTTPError as e:
-        app_logger.error(f"GitLab API HTTP 错误: {str(e)}")
-        return False, 0, f"HTTP 错误: {str(e)}"
+        app_logger.error(f"gitlab | api_http_error | error={e}")
+        return False, 0, f"HTTP 错误: {e}"
     except requests.exceptions.Timeout:
-        app_logger.error("GitLab API 请求超时")
+        app_logger.error("gitlab | api_timeout")
         return False, 0, "请求超时"
     except Exception as e:
-        app_logger.error(f"获取项目 ID 失败: {str(e)}")
+        app_logger.error(f"gitlab | get_project_id_failed | error={e}")
         return False, 0, str(e)

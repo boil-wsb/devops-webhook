@@ -26,6 +26,9 @@ gitlab_config:
 log_config:
   max_lines: 100           # 日志摘要最大行数（截取日志末尾 N 行作为摘要）
   error_context_lines: 5   # 错误上下文行数（在错误行前后提取 N 行用于定位问题）
+  level: "INFO"            # 全局日志级别（DEBUG/INFO/WARNING/ERROR/CRITICAL）
+  module_levels:           # 模块级别覆盖（key 为 logger 名称，value 为级别）
+    build_monitor: "DEBUG"
 
 # ==================== 日志存储配置 ====================
 log_storage_config:

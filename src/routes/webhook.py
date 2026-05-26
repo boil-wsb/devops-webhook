@@ -1,7 +1,9 @@
 import json
+import uuid
 import logging
 from flask import request, jsonify
 from logger import webhook_logger, monitor_logger
+from logger.context import set_request_context, clear_request_context
 
 app_logger = logging.getLogger('app_logger')
 from src.services import (
@@ -33,34 +35,35 @@ def process_webhook(request, route_name, subpath=None):
     """
     处理webhook请求的通用逻辑
     """
-    # 确保app_logger在所有地方都可用
     import logging
     global app_logger
     app_logger = logging.getLogger('app_logger')
-    
+
     if not request.is_json:
         return jsonify({"error": "无效的JSON格式"}), 400
 
     try:
-        # 获取原始请求体并记录到日志
+        set_request_context(request_id=uuid.uuid4().hex[:8], route_name=route_name)
+
         raw_body = request.get_data(as_text=True)
-        # 使用 webhook_logger 记录请求，确保日志持久化到 webhook_backup.log
         webhook_logger.log_request(route_name, request.headers, raw_body)
         payload = request.get_json()
-        
-        # 检查事件类型
+
+        set_request_context(
+            project_name=payload.get('project', {}).get('name', ''),
+            pipeline_iid=payload.get('object_attributes', {}).get('iid', '')
+        )
+
         object_kind = payload.get('object_kind')
         
         if object_kind == 'push':
             try:
-                # 处理 push 事件，记录所需字段
                 project_name = payload.get('project', {}).get('name', '')
                 ref = payload.get('ref', '')
                 user_name = payload.get('user_name', '')
                 commits = payload.get('commits', [])
                 git_url = payload.get('project', {}).get('web_url', '')
                 
-                # 构建 push 事件记录
                 push_record = {
                     'project_name': project_name,
                     'ref': ref,
@@ -76,19 +79,14 @@ def process_webhook(request, route_name, subpath=None):
                     ]
                 }
                 
-                # 记录 push 事件到全局变量和文件
                 record_push_event(push_record, push_records, push_records_lock)
                 
-                # 记录 push 事件到日志
                 monitor_logger.log_event(route_name, request.headers, json.dumps(push_record))
                 
-                # 返回成功响应
                 return jsonify({"message": f"已接收并处理 {route_name} 的推送事件"}), 200
             except Exception as e:
-                # 记录详细错误日志
-                error_msg = f"处理推送事件出错: {str(e)}"
+                error_msg = f"webhook | push_event_failed | error={e}"
                 monitor_logger.log_event(route_name, request.headers, error_msg)
-                # 延迟导入app_logger，避免循环导入问题
                 from logger import app_logger
                 app_logger.error(error_msg)
                 return jsonify({"error": error_msg}), 500
@@ -120,7 +118,7 @@ def process_webhook(request, route_name, subpath=None):
                                     callback_id = build_info.get('callback_id')
 
                         result = send_notification(route_name, message, chat_id=chat_id, message_id=message_id, callback_id=callback_id)
-                        app_logger.info(f"路由名称: {route_name}, 发送结果: method={result.get('method')}, success={result.get('success')}")
+                        app_logger.info(f"webhook | send_result | route={route_name}, method={result.get('method')}, success={result.get('success')}")
 
                         if status == 'running' and result.get('method') == 'api' and result.get('message_id'):
                             with running_builds_lock:
@@ -139,21 +137,16 @@ def process_webhook(request, route_name, subpath=None):
                             try:
                                 check_and_trigger(path_with_namespace, ref, project_name=project_name)
                             except Exception as e:
-                                app_logger.error(f"触发动作执行异常: {str(e)}")
+                                app_logger.error(f"webhook | trigger_action_failed | error={e}")
                 except Exception as e:
-                    app_logger.error(f"❌ format_message调用失败: {str(e)}")
-                    import traceback
-                    app_logger.error(traceback.format_exc())
+                    app_logger.error(f"webhook | format_message_failed | error={e}")
                 
-                # 返回成功响应
                 return jsonify({"message": f"已接收并处理 {route_name} 的流水线事件"}), 200
             except KeyError as e:
-                # 处理缺少必要字段的情况
                 error_msg = f"缺少必要字段: {str(e)}"
                 monitor_logger.log_event(route_name, request.headers, error_msg)
                 return jsonify({"error": error_msg}), 500
             except Exception as e:
-                # 处理其他异常
                 error_msg = f"处理流水线事件出错: {str(e)}"
                 monitor_logger.log_event(route_name, request.headers, error_msg)
                 return jsonify({"error": error_msg}), 500
@@ -161,6 +154,8 @@ def process_webhook(request, route_name, subpath=None):
         error_msg = f"处理webhook出错: {str(e)}"
         monitor_logger.log_event(route_name, request.headers, error_msg)
         return jsonify({"error": error_msg}), 500
+    finally:
+        clear_request_context()
 
 
 def _handle_failed_pipeline(payload, route_name):
@@ -200,16 +195,16 @@ def _handle_failed_pipeline(payload, route_name):
             if success_get_logs and log_content:
                 log_source = 'gitlab_api'
                 error_info = parse_error_from_logs(log_content)
-                app_logger.info(f"成功从 GitLab API 获取 Job {job_id} ({job_name}) 的日志，长度: {len(log_content)}")
+                app_logger.info(f"webhook | fetch_job_log | source=gitlab_api, job_id={job_id}, job_name={job_name}, log_size={len(log_content)}")
             else:
-                app_logger.warning(f"从 GitLab API 获取日志失败: {log_content}，将尝试本地日志")
+                app_logger.warning(f"webhook | fetch_job_log_failed | source=gitlab_api, error={log_content}, fallback=local")
         else:
-            app_logger.warning(f"获取失败 Job ID 失败: {error_msg}，将尝试本地日志")
+            app_logger.warning(f"webhook | get_failed_job_failed | error={error_msg}, fallback=local")
     else:
-        app_logger.warning("无法获取 project_id，将尝试本地日志")
+        app_logger.warning(f"webhook | fetch_job_log | project_id=missing, fallback=local")
 
     if not error_info:
-        app_logger.info(f"尝试从本地获取日志: project={project_name}, pipeline_iid={pipeline_iid}")
+        app_logger.info(f"webhook | fetch_job_log | source=local, project={project_name}, pipeline_iid={pipeline_iid}")
         local_logs = get_build_logs(project_name, branch_clean, pipeline_iid)
         if local_logs and local_logs.get('exists') and local_logs.get('full_log'):
             log_content = local_logs.get('full_log', '')
@@ -217,9 +212,9 @@ def _handle_failed_pipeline(payload, route_name):
             if not failed_job_name and local_logs.get('failed_job_name'):
                 failed_job_name = local_logs.get('failed_job_name', '')
             error_info = parse_error_from_logs(log_content)
-            app_logger.info(f"成功从本地获取日志，长度: {len(log_content)}")
+            app_logger.info(f"webhook | fetch_job_log | source=local, log_size={len(log_content)}")
         else:
-            app_logger.warning("本地日志也不存在")
+            app_logger.warning(f"webhook | fetch_job_log | source=local, result=not_found")
 
     if not error_info:
         error_info = {
@@ -245,14 +240,14 @@ def _handle_failed_pipeline(payload, route_name):
             notify_config = get_config().get('notify_config', {})
             chat_id = notify_config.get('route_chat_id_map', {}).get('default_webhook')
         if chat_id and not ROUTE_CHAT_ID_MAP.get('default_webhook'):
-            app_logger.info(f"使用 route_chat_id_map fallback 发送错误日志: {chat_id}")
+            app_logger.info(f"webhook | error_log_fallback | chat_source=default_webhook, chat_id={chat_id}")
         result = send_notification(route_name, error_message, chat_id=chat_id)
         if result.get('success'):
-            app_logger.info(f"已发送错误日志消息 (日志来源: {log_source or '无'}, method={result.get('method')})")
+            app_logger.info(f"webhook | error_log_sent | log_source={log_source or '-'}, method={result.get('method')}")
         else:
-            app_logger.error(f"发送错误日志消息失败")
+            app_logger.error(f"webhook | error_log_send_failed | project={project_name}, pipeline_iid={pipeline_iid}")
     except Exception as e:
-        app_logger.error(f"发送错误日志消息失败: {str(e)}")
+        app_logger.error(f"webhook | error_log_send_failed | error={e}")
 
     if log_content and log_source:
         try:
@@ -264,6 +259,6 @@ def _handle_failed_pipeline(payload, route_name):
                 error_summary=error_info.get('last_error_context', '') if error_info else '',
                 failed_job_name=failed_job_name
             )
-            app_logger.info(f"已保存构建日志到本地 (来源: {log_source})")
+            app_logger.info(f"webhook | save_build_log | source={log_source}")
         except Exception as e:
-            app_logger.error(f"保存构建日志失败: {str(e)}")
+            app_logger.error(f"webhook | save_build_log_failed | error={e}")

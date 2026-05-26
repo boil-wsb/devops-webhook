@@ -82,6 +82,11 @@ def convert_webhook_card_to_api_card(webhook_message):
             "tag": "standard_icon",
             "token": icon_token
         }
+    elif icon_token and icon_tag == 'emoji':
+        api_header["icon"] = {
+            "tag": "emoji",
+            "token": icon_token
+        }
     if text_tag_list:
         api_header["text_tag_list"] = text_tag_list
 
@@ -149,16 +154,16 @@ def send_notification(route_name, message, chat_id=None, message_id=None, callba
             store_sent_card(callback_id, card_content, chat_id=chat_id)
             result = update_card_via_api(card_content, message_id, callback_id)
             if result and result.get('success'):
-                app_logger.info(f"飞书通知通过API更新成功: route={route_name}, method=api_update")
+                app_logger.info(f"message | api_update_success | route={route_name}")
                 return {
                     "success": True,
                     "method": "api_update",
                     "message_id": message_id
                 }
             else:
-                app_logger.warning(f"飞书通知API更新失败，降级为Webhook: route={route_name}")
+                app_logger.warning(f"message | api_update_fallback | route={route_name}, reason=api_failed, fallback=webhook")
         except Exception as e:
-            app_logger.warning(f"飞书通知API更新异常，降级为Webhook: route={route_name}, error={str(e)}")
+            app_logger.warning(f"message | api_update_fallback | route={route_name}, error={e}, fallback=webhook")
     else:
         try:
             from src.services.feishu_notify import send_card_via_api, store_sent_card
@@ -169,33 +174,33 @@ def send_notification(route_name, message, chat_id=None, message_id=None, callba
                 callback_id=callback_id
             )
             if result and result.get('success'):
-                app_logger.info(f"飞书通知通过API发送成功: route={route_name}, method=api")
+                app_logger.info(f"message | api_send_success | route={route_name}")
                 return {
                     "success": True,
                     "method": "api",
                     "message_id": result.get('message_id')
                 }
             else:
-                app_logger.warning(f"飞书通知API发送失败，降级为Webhook: route={route_name}")
+                app_logger.warning(f"message | api_send_fallback | route={route_name}, reason=api_failed, fallback=webhook")
         except Exception as e:
-            app_logger.warning(f"飞书通知API发送异常，降级为Webhook: route={route_name}, error={str(e)}")
+            app_logger.warning(f"message | api_send_fallback | route={route_name}, error={e}, fallback=webhook")
 
     target_url = WEBHOOK_CONFIG.get(route_name, DEFAULT_TARGET_URL)
     if not target_url:
-        app_logger.error(f"路由 {route_name} 未配置目标URL，降级发送也失败")
+        app_logger.error(f"message | send_failed | route={route_name}, reason=no_target_url")
         return {"success": False, "method": None, "message_id": None}
 
     try:
         webhook_message = _strip_commit_from_webhook_message(message)
         send_formatted_message(target_url, webhook_message)
-        app_logger.info(f"飞书通知通过Webhook降级发送成功: route={route_name}, method=webhook")
+        app_logger.info(f"message | webhook_send_success | route={route_name}")
         return {
             "success": True,
             "method": "webhook",
             "message_id": None
         }
     except Exception as e:
-        app_logger.error(f"飞书通知Webhook降级发送也失败: route={route_name}, error={str(e)}")
+        app_logger.error(f"message | webhook_send_failed | route={route_name}, error={e}")
         return {"success": False, "method": "webhook", "message_id": None}
 
 
@@ -273,11 +278,9 @@ def _record_running_build(running_builds, running_builds_lock, pipeline_iid, pro
                     'callback_id': f"pipeline_{pipeline_iid}"
                 }
         except Exception as e:
-            app_logger.error(f"❌ 记录运行中构建失败: {str(e)}")
-            import traceback
-            app_logger.error(traceback.format_exc())
+            app_logger.error(f"message | record_running_build_failed | pipeline_iid={pipeline_iid}, error={e}")
     else:
-        app_logger.warning(f"❌ running_builds或running_builds_lock为None，无法记录运行中构建")
+        app_logger.warning("message | record_running_build_skipped | reason=running_builds_unavailable")
 
 
 def _remove_completed_build(running_builds, running_builds_lock, pipeline_iid, app_logger):
@@ -290,9 +293,9 @@ def _remove_completed_build(running_builds, running_builds_lock, pipeline_iid, a
             with running_builds_lock:
                 if pipeline_iid in running_builds:
                     del running_builds[pipeline_iid]
-                    app_logger.info(f"已移除完成构建: {pipeline_iid}")
+                    app_logger.info(f"message | remove_completed_build | pipeline_iid={pipeline_iid}")
         except Exception as e:
-            app_logger.error(f"移除完成构建失败: {str(e)}")
+            app_logger.error(f"message | remove_completed_build_failed | error={e}")
 
 
 def _find_deploy_ip(commit_url, push_records, push_records_lock, payload, app_logger):
@@ -304,7 +307,7 @@ def _find_deploy_ip(commit_url, push_records, push_records_lock, payload, app_lo
         try:
             # 从payload中提取当前的ref
             current_ref = payload.get('object_attributes', {}).get('ref', '')
-            app_logger.info(f"从payload获取的当前ref: {current_ref}")
+            app_logger.info(f"message | find_deploy_ip | current_ref={current_ref}")
             
             # 处理current_ref，去除前缀
             processed_current_ref = current_ref
@@ -314,13 +317,13 @@ def _find_deploy_ip(commit_url, push_records, push_records_lock, payload, app_lo
                 processed_current_ref = processed_current_ref.replace('refs/tags/', '')
             elif processed_current_ref.startswith('refs/remotes/'):
                 processed_current_ref = processed_current_ref.replace('refs/remotes/', '')
-            app_logger.info(f"处理后的当前ref: {processed_current_ref}")
+            app_logger.info(f"message | find_deploy_ip | processed_ref={processed_current_ref}")
             
             # 从push_records中查找对应的deploy_ip
             if push_records and push_records_lock:
-                app_logger.info(f"从push_records中搜索deploy_ip，commit_url: {commit_url}，ref: {processed_current_ref}")
+                app_logger.info(f"message | find_deploy_ip | source=push_records, commit_url={commit_url}, ref={processed_current_ref}")
                 with push_records_lock:
-                    app_logger.info(f"当前push_records数量: {len(push_records)}")
+                    app_logger.info(f"message | find_deploy_ip | push_records_count={len(push_records)}")
                     found_deploy_ip = False
                     
                     for push_record in push_records:
@@ -344,7 +347,7 @@ def _find_deploy_ip(commit_url, push_records, push_records_lock, payload, app_lo
                             # 然后查找commit_url匹配的记录
                             matching_commit = next((c for c in commits if c.get('url') == commit_url), None)
                             if matching_commit:
-                                app_logger.info(f"在push_records中找到相同ref的匹配commit")
+                                app_logger.info("message | find_deploy_ip | match=ref_and_commit_found")
                                 stages = matching_commit.get('stages', [])
                                 deploy_stage = next((s for s in stages if isinstance(s, dict) and s.get('deploy_ip')), None)
                                 if deploy_stage:
@@ -366,7 +369,7 @@ def _find_deploy_ip(commit_url, push_records, push_records_lock, payload, app_lo
                     if isinstance(build, dict) and build.get('stage', '').lower() == 'deploy':
                         deploy_ip = build.get('deploy_ip', '')
                         if deploy_ip:
-                            app_logger.info(f"从payload中找到deploy_ip: {deploy_ip}")
+                            app_logger.info(f"message | find_deploy_ip | source=payload, deploy_ip={deploy_ip}")
                             break
             
             # 如果没有找到，尝试从variables中查找
@@ -378,19 +381,17 @@ def _find_deploy_ip(commit_url, push_records, push_records_lock, payload, app_lo
                         value = var.get('value', '')
                         if key == 'DEPLOY_REMOTE_HOST' and value:
                             deploy_ip = value
-                            app_logger.info(f"从variables中找到deploy_ip: {deploy_ip}")
+                            app_logger.info(f"message | find_deploy_ip | source=variables, deploy_ip={deploy_ip}")
                             break
         except Exception as e:
-            app_logger.error(f"查找deploy_ip失败: {str(e)}")
-            import traceback
-            app_logger.error(traceback.format_exc())
+            app_logger.error(f"message | find_deploy_ip_failed | error={e}")
     
     # 将deploy_ip数组转换为字符串格式
     if isinstance(deploy_ip, list):
         deploy_ip = ', '.join(deploy_ip)
 
     if deploy_ip:
-        app_logger.info(f"部署IP: {deploy_ip}")
+        app_logger.info(f"message | find_deploy_ip | result=found, deploy_ip={deploy_ip}")
 
     return deploy_ip
 
@@ -460,7 +461,7 @@ def _get_failed_stages(commit_url, push_records, push_records_lock, payload, app
     # 3. 如果都没有找到，使用默认值"deploy"
     if not failed_stages:
         failed_stages = ["deploy"]
-        app_logger.info("使用默认失败stage: deploy")
+        app_logger.info("message | get_failed_stages | fallback=deploy")
     
     return failed_stages
 
@@ -576,7 +577,7 @@ def _build_message(project_name, subtitle, detail_url, message_config, text_tag_
                 "text_tag_list": text_tag_list,
                 "template": message_config['header']['template'],
                 "ud_icon": {
-                    "tag": "standard_icon",
+                    "tag": message_config['header'].get('icon_type', 'standard_icon'),
                     "token": message_config['header']['icon_token'],
                 }
             }
@@ -609,7 +610,7 @@ def format_message(payload, running_builds=None, running_builds_lock=None, route
     
     # 获取commit_url用于查找push_records
     commit_url = payload.get('commit', {}).get('url', '')
-    app_logger.info(f"当前commit_url: {commit_url}")
+    app_logger.info(f"message | format_message | commit_url={commit_url}")
 
     # 2. 处理parent_pipeline类型，不生成通知
     if 'parent_pipeline' == source:
@@ -692,7 +693,7 @@ def format_message(payload, running_builds=None, running_builds_lock=None, route
                 else:
                     display_user_name = user_name
             except Exception as e:
-                logging.getLogger('app_logger').warning(f"获取 open_id 失败: {str(e)}")
+                logging.getLogger('app_logger').warning(f"message | get_open_id_failed | error={e}")
                 display_user_name = user_name
 
         elements = [
@@ -743,7 +744,8 @@ def format_message(payload, running_builds=None, running_builds_lock=None, route
             'elements': elements,
             'header': {
                 'template': f"{'green' if status == 'success' else 'red'}",
-                'icon_token': f"{'succeed_filled' if status == 'success' else 'error_filled'}"
+                'icon_token': f"{'succeed_filled' if status == 'success' else '🔴'}",
+                'icon_type': 'emoji' if status == 'failed' else 'standard_icon'
             },
         }
         
@@ -758,12 +760,12 @@ def format_message(payload, running_builds=None, running_builds_lock=None, route
         subtitle = f"Pipeline版本号：{pipeline_iid_prev if pipeline_iid_prev else pipeline_iid}"
         if status == 'success' and deploy_ip:
             subtitle += f"，部署设备：{deploy_ip}"
-            app_logger.info(f"副标题:{subtitle}")
+            app_logger.info(f"message | format_message | subtitle={subtitle}")
         
         # 生成并返回消息
         callback_id = f"pipeline_{pipeline_iid}" if status == 'failed' else None
         message = _build_message(project_name, subtitle, detail_url, message_config, text_tag_list, callback_id=callback_id)
-        app_logger.info(f"message:{message}")
+        app_logger.info(f"message | format_output | project={project_name}, pipeline_iid={pipeline_iid}, status={status}")
         return message
 
     return None

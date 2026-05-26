@@ -72,11 +72,11 @@ def record_push_event(push_record, push_records, push_records_lock):
                     commits=processed_record.get('commits')
                 )
             except Exception as e:
-                app_logger.error(f"保存 push 记录到数据库失败: {str(e)}")
+                app_logger.error(f"record | save_push_to_db_failed | error={e}")
 
-        print(f"已记录push事件: {push_record['project_name']} {push_record['ref']}")
+        app_logger.info(f"record | push_recorded | project={push_record['project_name']}, ref={push_record['ref']}")
     except Exception as e:
-        app_logger.error(f"记录push事件时发生错误: {str(e)}")
+        app_logger.error(f"record | record_push_failed | error={e}")
 
 
 def record_pipeline_event(payload, subpath, pipeline_records, pipeline_records_lock, push_records, push_records_lock):
@@ -192,7 +192,7 @@ def record_pipeline_event(payload, subpath, pipeline_records, pipeline_records_l
                     commit_url=commit_url
                 )
             except Exception as e:
-                app_logger.error(f"保存 pipeline 记录到数据库失败: {str(e)}")
+                app_logger.error(f"record | save_pipeline_to_db_failed | error={e}")
 
         try:
             push_file_path = 'push_records.json'
@@ -282,14 +282,14 @@ def record_pipeline_event(payload, subpath, pipeline_records, pipeline_records_l
                             subpath=subpath
                         )
                     except Exception as e:
-                        app_logger.error(f"更新 push 记录的 pipeline 信息到数据库失败: {str(e)}")
+                        app_logger.error(f"record | update_push_pipeline_failed | error={e}")
 
         except Exception as e:
-            app_logger.error(f"更新push_records.json文件时发生错误: {str(e)}")
+            app_logger.error(f"record | update_json_failed | error={e}")
 
 
     except Exception as e:
-        app_logger.error(f"记录流水线事件时发生错误: {str(e)}")
+        app_logger.error(f"record | record_pipeline_failed | error={e}")
 
 
 def load_records_from_db(push_records, pipeline_records, push_records_lock, pipeline_records_lock):
@@ -316,7 +316,7 @@ def load_records_from_db(push_records, pipeline_records, push_records_lock, pipe
         db_path = config.get('db_path', 'webhook.db')
 
         if not os.path.exists(db_path):
-            app_logger.info("数据库文件不存在，跳过从数据库加载")
+            app_logger.info("record | db_not_found | skip_load=true")
             return False
 
         init_database()
@@ -328,7 +328,7 @@ def load_records_from_db(push_records, pipeline_records, push_records_lock, pipe
                     if record.get('commits') and isinstance(record['commits'], str):
                         record['commits'] = json.loads(record['commits'])
                 push_records.extend(db_push_records)
-            app_logger.info(f"从数据库加载了 {len(db_push_records)} 条 push 记录")
+            app_logger.info(f"record | load_push_from_db | count={len(db_push_records)}")
 
         db_pipeline_records = PipelineRecordDB.get_all()
         if db_pipeline_records:
@@ -337,10 +337,10 @@ def load_records_from_db(push_records, pipeline_records, push_records_lock, pipe
                     key = record.get('path_with_namespace')
                     if key:
                         pipeline_records[key] = record
-            app_logger.info(f"从数据库加载了 {len(db_pipeline_records)} 条 pipeline 记录")
+            app_logger.info(f"record | load_pipeline_from_db | count={len(db_pipeline_records)}")
 
         return len(db_push_records) > 0 or len(db_pipeline_records) > 0
 
     except Exception as e:
-        app_logger.error(f"从数据库加载记录失败: {str(e)}")
+        app_logger.error(f"record | load_records_from_db_failed | error={e}")
         return False

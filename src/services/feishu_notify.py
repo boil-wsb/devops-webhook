@@ -25,7 +25,7 @@ def _login(base_url, username, password):
         data = resp.json()
         return data.get('access_token')
     except Exception as e:
-        logger.error(f"飞书通知 API 登录失败: {str(e)}")
+        logger.error(f"feishu_notify | login_failed | error={e}")
         return None
 
 
@@ -38,14 +38,14 @@ def _get_token():
         return None
     base_url = config.get('api_base_url', '')
     if not base_url:
-        logger.error("飞书通知配置不完整: 缺少 api_base_url")
+        logger.error("feishu_notify | config_incomplete | missing=api_base_url")
         return None
 
     username = config.get('api_username', '')
     password = config.get('api_password', '')
 
     if not username or not password:
-        logger.info("飞书通知未配置 api_username/api_password，使用内网免认证模式")
+        logger.info("feishu_notify | auth_mode | mode=intranet_no_auth")
         return None
 
     token = _login(base_url, username, password)
@@ -73,9 +73,9 @@ def _refresh_token_on_401(e, headers):
     if e.response is None or e.response.status_code != 401:
         return None
     if not _has_credentials():
-        logger.warning("内网免认证模式下收到 401，无法通过重新登录重试")
+        logger.warning("feishu_notify | auth_401 | mode=intranet_no_auth, retry=disabled")
         return None
-    logger.warning("飞书通知 Token 过期，尝试重新登录")
+    logger.warning("feishu_notify | token_expired | action=relogin")
     global _token_cache
     _token_cache = {'token': None, 'expires_at': 0}
     token = _get_token()
@@ -100,7 +100,7 @@ def get_user_open_id(user_name):
 
     base_url = config.get('api_base_url', '')
     if not base_url:
-        logger.error("飞书通知配置不完整: 缺少 api_base_url")
+        logger.error("feishu_notify | config_incomplete | missing=api_base_url")
         return None
 
     token = _get_token()
@@ -112,11 +112,11 @@ def get_user_open_id(user_name):
     try:
         resp = requests.get(lookup_url, params=payload, headers=headers, timeout=10)
         if resp.status_code == 404:
-            logger.info(f"open_id 查询接口不可用，尝试通过通知记录获取: user={user_name}")
+            logger.info(f"feishu_notify | get_open_id | user={user_name}, api_status=404, fallback=records")
             return _get_open_id_from_records(user_name, base_url, headers)
 
         if resp.status_code == 422:
-            logger.warning(f"open_id 查询接口参数格式不正确: user={user_name}, 尝试通过通知记录获取")
+            logger.warning(f"feishu_notify | get_open_id | user={user_name}, api_status=422, fallback=records")
             return _get_open_id_from_records(user_name, base_url, headers)
 
         resp.raise_for_status()
@@ -130,10 +130,10 @@ def get_user_open_id(user_name):
                 'open_id': open_id,
                 'expires_at': time.time() + 3600
             }
-            logger.info(f"获取用户 open_id 成功: user={user_name}, open_id={open_id}")
+            logger.info(f"feishu_notify | get_open_id | user={user_name}, found=true")
             return open_id
         else:
-            logger.warning(f"未找到用户 open_id: user={user_name}, result={result}")
+            logger.warning(f"feishu_notify | get_open_id | user={user_name}, found=false")
             return _get_open_id_from_records(user_name, base_url, headers)
     except requests.exceptions.HTTPError as e:
         new_token = _refresh_token_on_401(e, headers)
@@ -155,17 +155,17 @@ def get_user_open_id(user_name):
                         'open_id': open_id,
                         'expires_at': time.time() + 3600
                     }
-                    logger.info(f"获取用户 open_id 重试成功: user={user_name}")
+                    logger.info(f"feishu_notify | get_open_id_retry | user={user_name}, found=true")
                     return open_id
                 return _get_open_id_from_records(user_name, base_url, headers)
             except Exception as retry_e:
-                logger.error(f"获取用户 open_id 重试异常: {str(retry_e)}")
+                logger.error(f"feishu_notify | get_open_id_retry_failed | error={retry_e}")
                 return _get_open_id_from_records(user_name, base_url, headers)
         else:
-            logger.error(f"获取用户 open_id 失败: {str(e)}")
+            logger.error(f"feishu_notify | get_open_id_failed | user={user_name}, error={e}")
             return _get_open_id_from_records(user_name, base_url, headers)
     except Exception as e:
-        logger.error(f"获取用户 open_id 异常: {str(e)}")
+        logger.error(f"feishu_notify | get_open_id_failed | user={user_name}, error={e}")
         return _get_open_id_from_records(user_name, base_url, headers)
 
 
@@ -188,12 +188,12 @@ def _get_open_id_from_records(user_name, base_url, headers):
                     'open_id': open_id,
                     'expires_at': time.time() + 3600
                 }
-                logger.info(f"通过通知记录获取 open_id 成功: user={user_name}, open_id={open_id}")
+                logger.info(f"feishu_notify | get_open_id_from_records | user={user_name}, found=true")
                 return open_id
-        logger.warning(f"通知记录中未找到用户 open_id: user={user_name}")
+        logger.warning(f"feishu_notify | get_open_id_from_records | user={user_name}, found=false")
         return None
     except Exception as e:
-        logger.error(f"通过通知记录获取 open_id 异常: {str(e)}")
+        logger.error(f"feishu_notify | get_open_id_from_records_failed | error={e}")
         return None
 
 
@@ -208,14 +208,14 @@ def send_action_result(action_name, project_name, ref, success, output='', error
     callback_id = config.get('callback_id', '')
 
     if not base_url:
-        logger.error("飞书通知配置不完整: 缺少 api_base_url")
+        logger.error("feishu_notify | config_incomplete | missing=api_base_url")
         return
 
     has_chat_id = bool(chat_id and chat_id.strip())
     has_user = bool(notify_user and notify_user.strip())
 
     if not has_chat_id and not has_user:
-        logger.error("飞书通知配置不完整: 缺少 chat_id 或 notify_user")
+        logger.error("feishu_notify | config_incomplete | missing=chat_id_or_notify_user")
         return
 
     token = _get_token()
@@ -275,9 +275,9 @@ def send_action_result(action_name, project_name, ref, success, output='', error
         result = resp.json()
         if result.get('success'):
             target = f"chat_id={chat_id}" if has_chat_id else f"user={notify_user}"
-            logger.info(f"飞书通知已发送: action={action_name}, {target}")
+            logger.info(f"feishu_notify | action_sent | action={action_name}, target={target}")
         else:
-            logger.error(f"飞书通知发送失败: {result.get('error')}")
+            logger.error(f"feishu_notify | action_send_failed | action={action_name}, error={result.get('error')}")
     except requests.exceptions.HTTPError as e:
         new_token = _refresh_token_on_401(e, headers)
         if new_token:
@@ -286,15 +286,15 @@ def send_action_result(action_name, project_name, ref, success, output='', error
                 resp.raise_for_status()
                 result = resp.json()
                 if result.get('success'):
-                    logger.info(f"飞书通知重试成功: action={action_name}")
+                    logger.info(f"feishu_notify | action_send_retry | action={action_name}, success=true")
                 else:
-                    logger.error(f"飞书通知重试失败: {result.get('error')}")
+                    logger.error(f"feishu_notify | action_send_retry | success=false, error={result.get('error')}")
             except Exception as retry_e:
-                logger.error(f"飞书通知重试异常: {str(retry_e)}")
+                logger.error(f"feishu_notify | action_send_retry_failed | error={retry_e}")
         else:
-            logger.error(f"飞书通知发送失败: {str(e)}")
+            logger.error(f"feishu_notify | action_send_failed | action={action_name}, error={e}")
     except Exception as e:
-        logger.error(f"飞书通知发送异常: {str(e)}")
+        logger.error(f"feishu_notify | action_send_exception | error={e}")
 
 
 def send_card_via_api(card_content, chat_id=None, notify_user=None, callback_id=None):
@@ -304,7 +304,7 @@ def send_card_via_api(card_content, chat_id=None, notify_user=None, callback_id=
 
     base_url = config.get('api_base_url', '')
     if not base_url:
-        logger.error("飞书通知配置不完整: 缺少 api_base_url")
+        logger.error("feishu_notify | config_incomplete | missing=api_base_url")
         return None
 
     has_chat_id = bool(chat_id and chat_id.strip())
@@ -316,7 +316,7 @@ def send_card_via_api(card_content, chat_id=None, notify_user=None, callback_id=
             chat_id = default_chat_id
             has_chat_id = True
         else:
-            logger.error("飞书通知配置不完整: 缺少 chat_id 或 notify_user")
+            logger.error("feishu_notify | config_incomplete | missing=chat_id_or_notify_user")
             return None
 
     token = _get_token()
@@ -338,10 +338,10 @@ def send_card_via_api(card_content, chat_id=None, notify_user=None, callback_id=
         result = resp.json()
         if result.get('success'):
             target = f"chat_id={chat_id}" if has_chat_id else f"user={notify_user}"
-            logger.info(f"飞书卡片通知已发送: {target}, message_id={result.get('message_id')}")
+            logger.info(f"feishu_notify | card_sent | target={target}, message_id={result.get('message_id')}")
             return result
         else:
-            logger.error(f"飞书卡片通知发送失败: {result.get('error')}")
+            logger.error(f"feishu_notify | card_send_failed | error={result.get('error')}")
             return None
     except requests.exceptions.HTTPError as e:
         new_token = _refresh_token_on_401(e, headers)
@@ -351,19 +351,19 @@ def send_card_via_api(card_content, chat_id=None, notify_user=None, callback_id=
                 resp.raise_for_status()
                 result = resp.json()
                 if result.get('success'):
-                    logger.info("飞书卡片通知重试成功")
+                    logger.info("feishu_notify | card_send_retry | success=true")
                     return result
                 else:
-                    logger.error(f"飞书卡片通知重试失败: {result.get('error')}")
+                    logger.error(f"feishu_notify | card_send_retry | success=false, error={result.get('error')}")
                     return None
             except Exception as retry_e:
-                logger.error(f"飞书卡片通知重试异常: {str(retry_e)}")
+                logger.error(f"feishu_notify | card_send_retry_failed | error={retry_e}")
                 return None
         else:
-            logger.error(f"飞书卡片通知发送失败: {str(e)}")
+            logger.error(f"feishu_notify | card_send_failed | error={e}")
             return None
     except Exception as e:
-        logger.error(f"飞书卡片通知发送异常: {str(e)}")
+        logger.error(f"feishu_notify | card_send_exception | error={e}")
         return None
 
 
@@ -374,7 +374,7 @@ def update_card_via_api(card_content, message_id, callback_id):
 
     base_url = config.get('api_base_url', '')
     if not base_url:
-        logger.error("飞书通知配置不完整: 缺少 api_base_url")
+        logger.error("feishu_notify | config_incomplete | missing=api_base_url")
         return None
 
     token = _get_token()
@@ -392,10 +392,10 @@ def update_card_via_api(card_content, message_id, callback_id):
         resp.raise_for_status()
         result = resp.json()
         if result.get('success'):
-            logger.info(f"飞书卡片通知已更新: message_id={message_id}")
+            logger.info(f"feishu_notify | card_updated | message_id={message_id}")
             return result
         else:
-            logger.error(f"飞书卡片通知更新失败: {result.get('error')}")
+            logger.error(f"feishu_notify | card_update_failed | error={result.get('error')}")
             return None
     except requests.exceptions.HTTPError as e:
         new_token = _refresh_token_on_401(e, headers)
@@ -405,19 +405,19 @@ def update_card_via_api(card_content, message_id, callback_id):
                 resp.raise_for_status()
                 result = resp.json()
                 if result.get('success'):
-                    logger.info("飞书卡片通知更新重试成功")
+                    logger.info("feishu_notify | card_update_retry | success=true")
                     return result
                 else:
-                    logger.error(f"飞书卡片通知更新重试失败: {result.get('error')}")
+                    logger.error(f"feishu_notify | card_update_retry | success=false, error={result.get('error')}")
                     return None
             except Exception as retry_e:
-                logger.error(f"飞书卡片通知更新重试异常: {str(retry_e)}")
+                logger.error(f"feishu_notify | card_update_retry_failed | error={retry_e}")
                 return None
         else:
-            logger.error(f"飞书卡片通知更新失败: {str(e)}")
+            logger.error(f"feishu_notify | card_update_failed | error={e}")
             return None
     except Exception as e:
-        logger.error(f"飞书卡片通知更新异常: {str(e)}")
+        logger.error(f"feishu_notify | card_update_exception | error={e}")
         return None
 
 
@@ -444,15 +444,15 @@ def get_sent_card(callback_id):
 def forward_card_to_assignee(callback_id, assignee_open_id):
     card_info = get_sent_card(callback_id)
     if not card_info:
-        logger.error(f"未找到已发送卡片: callback_id={callback_id}")
+        logger.error(f"feishu_notify | card_not_found | callback_id={callback_id}")
         return None
 
     card_content = card_info['card_content']
     result = send_card_via_api(card_content, notify_user=assignee_open_id)
     if result and result.get('success'):
-        logger.info(f"卡片已转发给负责人: callback_id={callback_id}, assignee={assignee_open_id}")
+        logger.info(f"feishu_notify | card_forwarded | callback_id={callback_id}")
     else:
-        logger.error(f"卡片转发失败: callback_id={callback_id}, result={result}")
+        logger.error(f"feishu_notify | card_forward_failed | callback_id={callback_id}, error={result}")
     return result
 
 
@@ -466,7 +466,7 @@ def handle_card_action_callback(data):
         assignee_open_id = value.get('assignee_open_id', '')
         operator_open_id = data.get('open_id', '')
 
-        logger.info(f"收到卡片转发回调: callback_id={callback_id}, operator={operator_open_id}, assignee={assignee_open_id}")
+        logger.info(f"feishu_notify | forward_callback | callback_id={callback_id}")
 
         result = forward_card_to_assignee(callback_id, assignee_open_id)
 
