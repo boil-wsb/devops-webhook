@@ -69,8 +69,9 @@ def convert_webhook_card_to_api_card(webhook_message):
         subtitle_val = subtitle_val.get('content', '')
 
     text_tag_list = header.get('text_tag_list', [])
-    icon_token = header.get('icon_token') or (header.get('ud_icon') or {}).get('token', '')
-    icon_tag = header.get('ud_icon', {}).get('tag', '')
+    ud_icon = header.get('ud_icon') or {}
+    icon_token = header.get('icon_token') or ud_icon.get('token', '')
+    icon_tag = ud_icon.get('tag', '')
     api_header = {
         "title": header.get('title', {}),
         "template": header.get('template', 'blue')
@@ -80,11 +81,6 @@ def convert_webhook_card_to_api_card(webhook_message):
     if icon_token and icon_tag == 'standard_icon':
         api_header["icon"] = {
             "tag": "standard_icon",
-            "token": icon_token
-        }
-    elif icon_token and icon_tag == 'emoji':
-        api_header["icon"] = {
-            "tag": "emoji",
             "token": icon_token
         }
     if text_tag_list:
@@ -568,7 +564,7 @@ def _build_message(project_name, subtitle, detail_url, message_config, text_tag_
             "header": {
                 "title": {
                     "tag": "plain_text",
-                    "content": project_name
+                    "content": f"🔴 {project_name}" if message_config['header'].get('icon_token') is None else project_name
                 },
                 "subtitle": {
                     "tag": "plain_text",
@@ -577,9 +573,9 @@ def _build_message(project_name, subtitle, detail_url, message_config, text_tag_
                 "text_tag_list": text_tag_list,
                 "template": message_config['header']['template'],
                 "ud_icon": {
-                    "tag": message_config['header'].get('icon_type', 'standard_icon'),
+                    "tag": "standard_icon",
                     "token": message_config['header']['icon_token'],
-                }
+                } if message_config['header'].get('icon_token') else None
             }
         }
     }
@@ -744,8 +740,7 @@ def format_message(payload, running_builds=None, running_builds_lock=None, route
             'elements': elements,
             'header': {
                 'template': f"{'green' if status == 'success' else 'red'}",
-                'icon_token': f"{'succeed_filled' if status == 'success' else '🔴'}",
-                'icon_type': 'emoji' if status == 'failed' else 'standard_icon'
+                'icon_token': 'succeed_filled' if status == 'success' else None,
             },
         }
         
