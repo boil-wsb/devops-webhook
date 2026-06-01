@@ -51,32 +51,6 @@ workflow:
     - <<: *if-master-branch # master
     - <<: *if-merge-request
 
-# setup Stage
-setup-env:
-  stage: setup
-  rules:
-    # dynamic generates the image tag based on the branch or event triggers the pipeline
-    - <<: *if-dev-int-branch # develop-*
-      # Trigger condition for DEV deployment, if committing some code to the branch which prefix is "develop", then trigger current pipeline
-      variables:
-        IMAGE_TAG: "${CI_COMMIT_REF_NAME}-${VERSION}"
-    - <<: *if-test-int-branch # test-*
-      variables:
-        IMAGE_TAG: "${CI_COMMIT_REF_NAME}"
-    - <<: *if-release-branch # release-*
-      variables:
-        IMAGE_TAG: "${CI_COMMIT_REF_NAME}"
-    - <<: *if-other-branch # feature-* || hotfix-*
-      variables:
-        IMAGE_TAG: "${CI_COMMIT_REF_NAME}-${VERSION}"
-    - <<: *if-master-branch # master
-      variables:
-        IMAGE_TAG: "${VERSION}"
-  script:
-    - echo "VERSION=${VERSION}"
-    - echo "IMAGE_TAG=${IMAGE_TAG}"
-    - echo "DOCKER_IMAGE_NAME=${DOCKER_IMAGE_NAME}"
-
 
 docker-build:
   # Use the official docker image.
