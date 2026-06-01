@@ -609,7 +609,8 @@ def format_message(payload, running_builds=None, running_builds_lock=None, route
     app_logger.info(f"message | format_message | commit_url={commit_url}")
 
     # 2. 处理parent_pipeline类型，不生成通知
-    if 'parent_pipeline' == source:
+    if source in ('parent_pipeline', 'merge_request_event'):
+        app_logger.info(f"message | format_message | skip_source={source}, project={project_name}, pipeline_iid={pipeline_iid}")
         return None
 
     # 3. 处理deploy_custom_branch类型，查找相似记录

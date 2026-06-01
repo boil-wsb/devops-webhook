@@ -92,6 +92,11 @@ def process_webhook(request, route_name, subpath=None):
                 return jsonify({"error": error_msg}), 500
         else:
             try:
+                source = payload.get('object_attributes', {}).get('source', '')
+                if source in ('parent_pipeline', 'merge_request_event'):
+                    app_logger.info(f"webhook | skip_source | source={source}, route={route_name}")
+                    return jsonify({"message": f"已忽略 {source} 类型事件"}), 200
+
                 record_pipeline_event(payload, subpath, pipeline_records, pipeline_records_lock, push_records, push_records_lock)
 
                 status = payload['object_attributes'].get('status', '')
