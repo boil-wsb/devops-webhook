@@ -1,0 +1,101 @@
+# DevOps Webhook 示例配置文件
+# 复制此文件为 config.yaml 并填入实际值
+# cp config.example.yaml config.yaml
+
+# ==================== Webhook 配置 ====================
+# 飞书机器人 Webhook 地址映射
+# key: 路由路径（与 GitLab Webhook URL 中的路径对应）, value: 飞书机器人 Webhook URL
+webhook_config:
+  vendor_bot: "https://open.feishu.cn/open-apis/bot/v2/hook/YOUR_HOOK_ID"             # 默认供应商机器人
+  "vendor_bot/v2": "https://open.feishu.cn/open-apis/bot/v2/hook/YOUR_HOOK_ID"        # V2 版本供应商机器人
+  "vendor_bot/itreporter": "https://open.feishu.cn/open-apis/bot/v2/hook/YOUR_HOOK_ID" # IT 报告机器人
+  "monitor/event": "https://open.feishu.cn/open-apis/bot/v2/hook/YOUR_HOOK_ID"        # 监控告警机器人
+  "vendor_bot/v2/PD4": "https://open.feishu.cn/open-apis/bot/v2/hook/YOUR_HOOK_ID"    # PD4 产品线机器人
+  "vendor_bot/v2/PD3": "https://open.feishu.cn/open-apis/bot/v2/hook/YOUR_HOOK_ID"    # PD3 产品线机器人
+  "vendor_bot/v2/edge": "https://open.feishu.cn/open-apis/bot/v2/hook/YOUR_HOOK_ID"   # Edge 产品线机器人
+  "vendor_bot/v2/DO": "https://open.feishu.cn/open-apis/bot/v2/hook/YOUR_HOOK_ID"     # DO 产品线机器人
+
+# 默认飞书机器人 Webhook URL（路由未匹配时使用）
+default_target_url: "https://open.feishu.cn/open-apis/bot/v2/hook/YOUR_DEFAULT_HOOK_ID"
+
+# ==================== GitLab 配置 ====================
+gitlab_config:
+  gitlab_url: "http://YOUR_GITLAB_HOST/"       # GitLab 服务器地址
+  private_token: "YOUR_GITLAB_PRIVATE_TOKEN"   # GitLab API 访问令牌（需有 read_api 权限）
+
+# ==================== 日志解析配置 ====================
+log_config:
+  max_lines: 100           # 日志摘要最大行数（截取日志末尾 N 行作为摘要）
+  error_context_lines: 5   # 错误上下文行数（在错误行前后提取 N 行用于定位问题）
+  level: "INFO"            # 全局日志级别（DEBUG/INFO/WARNING/ERROR/CRITICAL）
+  module_levels:           # 模块级别覆盖（key 为 logger 名称，value 为级别）
+    build_monitor: "DEBUG"
+
+# ==================== 日志存储配置 ====================
+log_storage_config:
+  log_storage_path: "logs" # 日志文件存储目录（相对于项目根目录）
+  retention_days: 120      # 日志文件保留天数，超过此天数的日志文件将被清理
+
+# ==================== 数据库配置 ====================
+db_config:
+  db_path: "data/webhook.db" # SQLite 数据库文件路径（相对于项目根目录）
+  wal_mode: true             # 是否启用 WAL 模式（Write-Ahead Logging，提升并发读写性能）
+  retention_days: 120        # 数据库记录保留天数，超过此天数的记录将被定时清理
+  cleanup_hour: 3            # 每日定时清理时间（24小时制，3 表示凌晨 3 点执行清理）
+
+# ==================== MinIO 配置 ====================
+minio_config:
+  minio_endpoint: "http://YOUR_MINIO_HOST:9000"  # MinIO 对象存储服务地址
+  minio_access_key: "YOUR_MINIO_ACCESS_KEY"       # MinIO 访问密钥（Access Key）
+  minio_secret_key: "YOUR_MINIO_SECRET_KEY"       # MinIO 密钥（Secret Key）
+
+# ==================== 超时与跳过配置 ====================
+# 跳过超时检查的项目列表（这些项目不会触发超时告警）
+skip_timeout_check:
+  - "example-project"
+
+# 各项目自定义超时时间（秒）
+# key: 项目名称, value: 超时秒数（超过此时间未完成的 Pipeline 将触发超时告警）
+timeout_seconds:
+  ExampleProject: 600
+
+# ==================== 触发动作配置 ====================
+# Pipeline 成功后触发的远程动作（通过 SSH 异步执行）
+# 每个触发项定义匹配条件和要执行的 SSH 命令或脚本
+# 脚本文件统一放置在项目 scripts/ 目录下，执行时自动上传到远程主机
+# variables 中的变量会作为环境变量注入到远程执行环境中
+# 执行完成后会通过飞书通知 API 向指定用户发送卡片通知
+trigger_actions:
+  - name: "example-deploy"                        # 触发动作名称（用于日志标识）
+    project_pattern: "example-project"            # 项目路径匹配模式（path_with_namespace 中包含此字符串即匹配）
+    ref_pattern: "main"                           # 分支名匹配模式（ref 去除前缀后完全匹配）
+    ssh_host: "YOUR_SSH_HOST"                     # SSH 目标主机地址
+    ssh_port: 22                                  # SSH 端口
+    ssh_user: "root"                              # SSH 用户名
+    ssh_password: "YOUR_SSH_PASSWORD"             # SSH 密码
+    script: "deploy.sh"                           # 脚本文件名（位于 scripts/ 目录下，与 ssh_command 二选一）
+    # ssh_command: "pwd && ls"                    # 直接执行的远程命令（与 script 二选一）
+    variables:                                    # 传递给脚本的环境变量
+      REPO_URL: "YOUR_REPO_URL"
+      DEPLOY_DIR: "/opt/software/example"
+
+# ==================== 飞书通知配置 ====================
+# 触发动作执行完成后，通过 ops-manager 的飞书通知 API 向指定用户或群聊发送卡片通知
+# user 和 chat_id 二选一，不能同时提供（API 强制要求）
+notify_config:
+  api_base_url: "http://localhost:8000"           # ops-manager API 地址
+  # api_username: "YOUR_USERNAME"                 # ops-manager 登录用户名（内网免认证模式下无需配置）
+  # api_password: "YOUR_PASSWORD"                 # ops-manager 登录密码（内网免认证模式下无需配置）
+  # notify_user: "YOUR_USERNAME"                  # 接收飞书通知的用户（ops-manager 用户名，与 chat_id 二选一）
+  # chat_id: "oc_xxxxxxxxxxxxxxxxxxxxxxxx"        # 飞书群聊 ID（与 notify_user 二选一）
+  chat_id: "oc_xxxxxxxxxxxxxxxxxxxxxxxx"          # 默认飞书群聊 ID
+  callback_id: ""                                 # 业务回调标识，用于后续卡片更新（可选）
+  route_chat_id_map:
+    vendor_bot: "oc_xxxxxxxxxxxxxxxxxxxxxxxx"
+    "vendor_bot/v2": "oc_xxxxxxxxxxxxxxxxxxxxxxxx"
+    "vendor_bot/v2/PD4": "oc_xxxxxxxxxxxxxxxxxxxxxxxx"
+    "vendor_bot/v2/PD3": "oc_xxxxxxxxxxxxxxxxxxxxxxxx"
+    "vendor_bot/v2/edge": "oc_xxxxxxxxxxxxxxxxxxxxxxxx"
+    "vendor_bot/v2/DO": "oc_xxxxxxxxxxxxxxxxxxxxxxxx"
+    "vendor_bot/itreporter": "oc_xxxxxxxxxxxxxxxxxxxxxxxx"
+    "default_webhook": "oc_xxxxxxxxxxxxxxxxxxxxxxxx"  # 构建失败日志卡片的默认发送目标
