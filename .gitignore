@@ -164,3 +164,6 @@ docker-compose.override.yml
 # Trae
 .trae/
 .docs/
+docs/
+
+config.yaml
