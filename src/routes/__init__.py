@@ -559,13 +559,17 @@ def register_routes(app):
                                     'ref': processed_ref,
                                     'user_name': record.get('user_name', ''),
                                     'pipeline_iid': commit.get('pipeline_iid'),
-                                    'push_time': commit.get('timestamp', ''),
+                                    'push_time': record.get('push_time', commit.get('timestamp', '')),
                                     'pipeline_status': commit.get('pipeline_status', ''),
                                     'deploy_ips': deploy_ips,
                                     'message': commit.get('message', ''),
-                                    'subpath': record.get('subpath', '')
+                                    'subpath': record.get('subpath', ''),
+                                    'git_url': record.get('git_url', '')
                                 }
                                 cd_records.append(cd_record)
+
+            # 按推送时间倒序排序
+            cd_records.sort(key=lambda r: r.get('push_time', ''), reverse=True)
 
             return jsonify({
                 'status': 'success',

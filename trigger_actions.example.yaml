@@ -1,0 +1,77 @@
+# 触发动作配置
+# Pipeline 成功后触发的动作（SSH 远程执行 或 本地执行）
+# - 有 ssh_host 字段 → SSH 远程执行
+# - 无 ssh_host 字段 → 本地执行（subprocess）
+# - ref_patterns 列表优先于 ref_pattern 单值
+# - 脚本文件统一放置在 scripts/ 目录下
+# - variables 中的变量会作为环境变量注入到执行环境中
+# - workorder: true → 触发前从 MinIO 下载 workorder/deploy.zip（MD5 一致则跳过）
+# - 修改此文件后自动热更新，无需重启服务
+
+trigger_actions:
+  # === iam 项目（SSH 远程执行） ===
+  - name: "iam-deploy"
+    project_pattern: "iam"
+    ref_pattern: "main"
+    ssh_host: "YOUR_SSH_HOST"
+    ssh_port: 22
+    ssh_user: "root"
+    ssh_password: "YOUR_SSH_PASSWORD"
+    script: "iam_deploy.sh"
+    variables:
+      REPO_URL: "YOUR_REPO_URL"
+      DEPLOY_DIR: "/opt/software/iam"
+
+  # === shdy-dispatch-system 项目（本地执行） ===
+  - name: "shdy-dispatch-system-deploy"
+    project_pattern: "shdy-dispatch-system"
+    workorder: true
+    ref_patterns:
+      - "dev-1.0.250509-shenhuo"
+      - "dev-1.0.250624"
+      - "dev-1.0.250819"
+      - "dev-1.0.251103-bensteel"
+    script: "shdy-dispatch-system_deploy.py"
+    variables:
+      MINIO_ENDPOINT: "YOUR_MINIO_HOST:9000"
+      MINIO_ACCESS_KEY: "YOUR_MINIO_ACCESS_KEY"
+      MINIO_SECRET_KEY: "YOUR_MINIO_SECRET_KEY"
+      NEXUS_URL: "YOUR_NEXUS_HOST:8083"
+      NEXUS_USER: "YOUR_NEXUS_USER"
+      NEXUS_PASSWORD: "YOUR_NEXUS_PASSWORD"
+
+  # === wms-application 项目（本地执行） ===
+  - name: "wms-application-deploy"
+    project_pattern: "wms-application"
+    workorder: true
+    ref_patterns:
+      - "release-shenhuo"
+      - "dev-bulk"
+      - "dev-1.1.250812-silver"
+      - "dev-1.1.251203-steel-JE250283"
+    script: "wms-application_deploy.py"
+    variables:
+      MINIO_ENDPOINT: "YOUR_MINIO_HOST:9000"
+      MINIO_ACCESS_KEY: "YOUR_MINIO_ACCESS_KEY"
+      MINIO_SECRET_KEY: "YOUR_MINIO_SECRET_KEY"
+      NEXUS_URL: "YOUR_NEXUS_HOST:8083"
+      NEXUS_USER: "YOUR_NEXUS_USER"
+      NEXUS_PASSWORD: "YOUR_NEXUS_PASSWORD"
+
+  # === acre-web 项目（本地执行） ===
+  - name: "acre-web-deploy"
+    project_pattern: "acre-web"
+    workorder: true
+    ref_patterns:
+      - "wms-east-hope"
+      - "wms-shenhuo"
+      - "wms-baiyin"
+      - "wms-steel-JE250283"
+    script: "acre-web_deploy.py"
+    variables:
+      MINIO_ENDPOINT: "YOUR_MINIO_HOST:9000"
+      MINIO_ACCESS_KEY: "YOUR_MINIO_ACCESS_KEY"
+      MINIO_SECRET_KEY: "YOUR_MINIO_SECRET_KEY"
+      NEXUS_URL: "YOUR_NEXUS_HOST:8083"
+      NEXUS_USER: "YOUR_NEXUS_USER"
+      NEXUS_PASSWORD: "YOUR_NEXUS_PASSWORD"

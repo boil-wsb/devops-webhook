@@ -140,7 +140,8 @@ def process_webhook(request, route_name, subpath=None):
                             project_name = payload.get('project', {}).get('name', '')
                             ref = payload['object_attributes'].get('ref', '')
                             try:
-                                check_and_trigger(path_with_namespace, ref, project_name=project_name)
+                                pipeline_iid = payload['object_attributes'].get('iid')
+                                check_and_trigger(path_with_namespace, ref, project_name=project_name, pipeline_iid=pipeline_iid)
                             except Exception as e:
                                 app_logger.error(f"webhook | trigger_action_failed | error={e}")
                 except Exception as e:
@@ -200,16 +201,14 @@ def _handle_failed_pipeline(payload, route_name):
             if success_get_logs and log_content:
                 log_source = 'gitlab_api'
                 error_info = parse_error_from_logs(log_content)
-                app_logger.info(f"webhook | fetch_job_log | source=gitlab_api, job_id={job_id}, job_name={job_name}, log_size={len(log_content)}")
             else:
-                app_logger.warning(f"webhook | fetch_job_log_failed | source=gitlab_api, error={log_content}, fallback=local")
+                app_logger.warning(f"webhook | fetch_job_log | source=gitlab_api_failed, job_id={job_id}, fallback=local")
         else:
-            app_logger.warning(f"webhook | get_failed_job_failed | error={error_msg}, fallback=local")
+            app_logger.warning(f"webhook | fetch_job_log | source=get_failed_job_failed, error={error_msg}, fallback=local")
     else:
-        app_logger.warning(f"webhook | fetch_job_log | project_id=missing, fallback=local")
+        app_logger.warning(f"webhook | fetch_job_log | source=project_id_missing, fallback=local")
 
     if not error_info:
-        app_logger.info(f"webhook | fetch_job_log | source=local, project={project_name}, pipeline_iid={pipeline_iid}")
         local_logs = get_build_logs(project_name, branch_clean, pipeline_iid)
         if local_logs and local_logs.get('exists') and local_logs.get('full_log'):
             log_content = local_logs.get('full_log', '')
@@ -217,9 +216,8 @@ def _handle_failed_pipeline(payload, route_name):
             if not failed_job_name and local_logs.get('failed_job_name'):
                 failed_job_name = local_logs.get('failed_job_name', '')
             error_info = parse_error_from_logs(log_content)
-            app_logger.info(f"webhook | fetch_job_log | source=local, log_size={len(log_content)}")
         else:
-            app_logger.warning(f"webhook | fetch_job_log | source=local, result=not_found")
+            app_logger.warning(f"webhook | fetch_job_log | source=local_not_found, project={project_name}, pipeline_iid={pipeline_iid}")
 
     if not error_info:
         error_info = {
@@ -244,15 +242,13 @@ def _handle_failed_pipeline(payload, route_name):
         if not chat_id:
             notify_config = get_config().get('notify_config', {})
             chat_id = notify_config.get('route_chat_id_map', {}).get('default_webhook')
-        if chat_id and not ROUTE_CHAT_ID_MAP.get('default_webhook'):
-            app_logger.info(f"webhook | error_log_fallback | chat_source=default_webhook, chat_id={chat_id}")
         result = send_notification(route_name, error_message, chat_id=chat_id)
         if result.get('success'):
             app_logger.info(f"webhook | error_log_sent | log_source={log_source or '-'}, method={result.get('method')}")
         else:
-            app_logger.error(f"webhook | error_log_send_failed | project={project_name}, pipeline_iid={pipeline_iid}")
+            app_logger.error(f"webhook | error_log_sent | project={project_name}, pipeline_iid={pipeline_iid}, result=failed")
     except Exception as e:
-        app_logger.error(f"webhook | error_log_send_failed | error={e}")
+        app_logger.error(f"webhook | error_log_sent | result=exception, error={e}")
 
     if log_content and log_source:
         try:
@@ -264,6 +260,6 @@ def _handle_failed_pipeline(payload, route_name):
                 error_summary=error_info.get('last_error_context', '') if error_info else '',
                 failed_job_name=failed_job_name
             )
-            app_logger.info(f"webhook | save_build_log | source={log_source}")
+            app_logger.info(f"webhook | save_build_log | source={log_source}, project={project_name}, pipeline_iid={pipeline_iid}")
         except Exception as e:
-            app_logger.error(f"webhook | save_build_log_failed | error={e}")
+            app_logger.error(f"webhook | save_build_log | project={project_name}, pipeline_iid={pipeline_iid}, result=failed, error={e}")

@@ -303,7 +303,6 @@ def _find_deploy_ip(commit_url, push_records, push_records_lock, payload, app_lo
         try:
             # 从payload中提取当前的ref
             current_ref = payload.get('object_attributes', {}).get('ref', '')
-            app_logger.info(f"message | find_deploy_ip | current_ref={current_ref}")
             
             # 处理current_ref，去除前缀
             processed_current_ref = current_ref
@@ -313,13 +312,11 @@ def _find_deploy_ip(commit_url, push_records, push_records_lock, payload, app_lo
                 processed_current_ref = processed_current_ref.replace('refs/tags/', '')
             elif processed_current_ref.startswith('refs/remotes/'):
                 processed_current_ref = processed_current_ref.replace('refs/remotes/', '')
-            app_logger.info(f"message | find_deploy_ip | processed_ref={processed_current_ref}")
             
             # 从push_records中查找对应的deploy_ip
             if push_records and push_records_lock:
-                app_logger.info(f"message | find_deploy_ip | source=push_records, commit_url={commit_url}, ref={processed_current_ref}")
                 with push_records_lock:
-                    app_logger.info(f"message | find_deploy_ip | push_records_count={len(push_records)}")
+                    app_logger.info(f"message | find_deploy_ip | ref={processed_current_ref}, commit_url={commit_url}, push_records_count={len(push_records)}")
                     found_deploy_ip = False
                     
                     for push_record in push_records:
@@ -343,14 +340,11 @@ def _find_deploy_ip(commit_url, push_records, push_records_lock, payload, app_lo
                             # 然后查找commit_url匹配的记录
                             matching_commit = next((c for c in commits if c.get('url') == commit_url), None)
                             if matching_commit:
-                                app_logger.info("message | find_deploy_ip | match=ref_and_commit_found")
                                 stages = matching_commit.get('stages', [])
                                 deploy_stage = next((s for s in stages if isinstance(s, dict) and s.get('deploy_ip')), None)
                                 if deploy_stage:
-                                    # app_logger.info(f"检查stage: {s}")
                                     deploy_ip = deploy_stage.get('deploy_ip', '')
                                     if deploy_ip:
-                                        # app_logger.info(f"从push_records中找到deploy_ip: {deploy_ip}")
                                         found_deploy_ip = True
                                         break
                             if found_deploy_ip:
@@ -358,14 +352,12 @@ def _find_deploy_ip(commit_url, push_records, push_records_lock, payload, app_lo
             
             # 如果push_records中没有找到，尝试从payload中查找
             if not deploy_ip:
-                # app_logger.info(f"在push_records中未找到deploy_ip，尝试从payload中查找")
                 # 从payload的builds中查找deploy_ip
                 builds = payload.get('builds', [])
                 for build in builds:
                     if isinstance(build, dict) and build.get('stage', '').lower() == 'deploy':
                         deploy_ip = build.get('deploy_ip', '')
                         if deploy_ip:
-                            app_logger.info(f"message | find_deploy_ip | source=payload, deploy_ip={deploy_ip}")
                             break
             
             # 如果没有找到，尝试从variables中查找
@@ -377,17 +369,24 @@ def _find_deploy_ip(commit_url, push_records, push_records_lock, payload, app_lo
                         value = var.get('value', '')
                         if key == 'DEPLOY_REMOTE_HOST' and value:
                             deploy_ip = value
-                            app_logger.info(f"message | find_deploy_ip | source=variables, deploy_ip={deploy_ip}")
                             break
+
+            # 汇总查找结果
+            source = 'not_found'
+            if deploy_ip:
+                if found_deploy_ip:
+                    source = 'push_records'
+                elif any(isinstance(b, dict) and b.get('stage', '').lower() == 'deploy' and b.get('deploy_ip') for b in payload.get('builds', [])):
+                    source = 'payload'
+                else:
+                    source = 'variables'
+            app_logger.info(f"message | find_deploy_ip | ref={processed_current_ref}, source={source}, deploy_ip={deploy_ip or 'not_found'}")
         except Exception as e:
             app_logger.error(f"message | find_deploy_ip_failed | error={e}")
     
     # 将deploy_ip数组转换为字符串格式
     if isinstance(deploy_ip, list):
         deploy_ip = ', '.join(deploy_ip)
-
-    if deploy_ip:
-        app_logger.info(f"message | find_deploy_ip | result=found, deploy_ip={deploy_ip}")
 
     return deploy_ip
 

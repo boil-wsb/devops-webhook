@@ -1303,6 +1303,35 @@ p {
     animation: fadeIn 0.5s ease-out;
 }
 
+.table-link {
+    color: var(--primary-color, #3b82f6);
+    text-decoration: none;
+    font-weight: 500;
+    transition: color 0.2s ease, text-decoration 0.2s ease;
+    cursor: pointer;
+}
+
+.table-link:hover {
+    color: var(--primary-hover, #2563eb);
+    text-decoration: underline;
+}
+
+.table-link:visited {
+    color: var(--primary-visited, #7c3aed);
+}
+
+[data-theme="dark"] .table-link {
+    color: var(--primary-color, #60a5fa);
+}
+
+[data-theme="dark"] .table-link:hover {
+    color: var(--primary-hover, #93bbfd);
+}
+
+[data-theme="dark"] .table-link:visited {
+    color: var(--primary-visited, #a78bfa);
+}
+
 .records-section {
     padding: var(--space-6);
 }

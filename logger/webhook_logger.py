@@ -57,7 +57,7 @@ class BaseLogger:
 
     def _create_base_formatter(self):
         return logging.Formatter(
-            '%(asctime)s.%(msecs)03d - %(levelname)s - [req_id=%(request_id)s] - %(name)s:%(lineno)d - %(message)s',
+            '%(asctime)s.%(msecs)03d - %(levelname)s - [req_id=%(request_id)s] - %(funcName)s:%(lineno)d - %(message)s',
             datefmt='%Y-%m-%d %H:%M:%S'
         )
 

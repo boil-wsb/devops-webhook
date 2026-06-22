@@ -60,24 +60,9 @@ timeout_seconds:
   ExampleProject: 600
 
 # ==================== 触发动作配置 ====================
-# Pipeline 成功后触发的远程动作（通过 SSH 异步执行）
-# 每个触发项定义匹配条件和要执行的 SSH 命令或脚本
-# 脚本文件统一放置在项目 scripts/ 目录下，执行时自动上传到远程主机
-# variables 中的变量会作为环境变量注入到远程执行环境中
-# 执行完成后会通过飞书通知 API 向指定用户发送卡片通知
-trigger_actions:
-  - name: "example-deploy"                        # 触发动作名称（用于日志标识）
-    project_pattern: "example-project"            # 项目路径匹配模式（path_with_namespace 中包含此字符串即匹配）
-    ref_pattern: "main"                           # 分支名匹配模式（ref 去除前缀后完全匹配）
-    ssh_host: "YOUR_SSH_HOST"                     # SSH 目标主机地址
-    ssh_port: 22                                  # SSH 端口
-    ssh_user: "root"                              # SSH 用户名
-    ssh_password: "YOUR_SSH_PASSWORD"             # SSH 密码
-    script: "deploy.sh"                           # 脚本文件名（位于 scripts/ 目录下，与 ssh_command 二选一）
-    # ssh_command: "pwd && ls"                    # 直接执行的远程命令（与 script 二选一）
-    variables:                                    # 传递给脚本的环境变量
-      REPO_URL: "YOUR_REPO_URL"
-      DEPLOY_DIR: "/opt/software/example"
+# trigger_actions 已迁移至独立配置文件 trigger_actions.yaml
+# 支持热更新（修改后自动重载，无需重启服务）
+# 详见 trigger_actions.example.yaml
 
 # ==================== 飞书通知配置 ====================
 # 触发动作执行完成后，通过 ops-manager 的飞书通知 API 向指定用户或群聊发送卡片通知

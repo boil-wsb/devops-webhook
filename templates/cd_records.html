@@ -717,7 +717,17 @@
                     row.style.animation = `slideUp 0.3s ease-out ${index * 0.05}s backwards`;
 
                     const projectCell = row.insertCell();
-                    projectCell.textContent = record.project_name || '';
+                    const subpath = record.subpath || '';
+                    if (subpath) {
+                        const projectLink = document.createElement('a');
+                        projectLink.href = `/pipelines/records/view/${subpath}`;
+                        projectLink.textContent = record.project_name || '';
+                        projectLink.className = 'table-link';
+                        projectLink.title = `查看 ${record.project_name} 项目记录`;
+                        projectCell.appendChild(projectLink);
+                    } else {
+                        projectCell.textContent = record.project_name || '';
+                    }
 
                     const branchCell = row.insertCell();
                     branchCell.textContent = record.ref || '';
@@ -726,7 +736,19 @@
                     userCell.textContent = record.user_name || '';
 
                     const pipelineCell = row.insertCell();
-                    pipelineCell.textContent = record.pipeline_iid || '';
+                    const pipelineIid = record.pipeline_iid || '';
+                    if (pipelineIid && subpath) {
+                        const pipelineLink = document.createElement('a');
+                        pipelineLink.href = `http://192.168.23.19/${subpath}/-/pipelines/${pipelineIid}`;
+                        pipelineLink.textContent = `#${pipelineIid}`;
+                        pipelineLink.className = 'table-link';
+                        pipelineLink.target = '_blank';
+                        pipelineLink.rel = 'noopener noreferrer';
+                        pipelineLink.title = `在 GitLab 中查看 Pipeline #${pipelineIid}`;
+                        pipelineCell.appendChild(pipelineLink);
+                    } else {
+                        pipelineCell.textContent = pipelineIid;
+                    }
 
                     const timeCell = row.insertCell();
                     const pushTime = record.push_time;
