@@ -259,6 +259,7 @@ def _record_running_build(running_builds, running_builds_lock, pipeline_iid, pro
         from datetime import datetime
         try:
             with running_builds_lock:
+                existing = running_builds.get(pipeline_iid, {})
                 running_builds[pipeline_iid] = {
                     'pipeline_iid': pipeline_iid,
                     'project_name': project_name,
@@ -270,7 +271,7 @@ def _record_running_build(running_builds, running_builds_lock, pipeline_iid, pro
                     'route_name': route_name,
                     'commit_url': commit_url,
                     'chat_id': chat_id,
-                    'message_id': None,
+                    'message_id': existing.get('message_id'),
                     'callback_id': f"pipeline_{pipeline_iid}"
                 }
         except Exception as e:
@@ -662,12 +663,42 @@ def format_message(payload, running_builds=None, running_builds_lock=None, route
         # 生成并返回消息
         return _build_message(project_name, subtitle, detail_url, message_config, text_tag_list)
     elif status in ['success', 'failed', 'canceled']:
-        # 从running_builds中移除已完成的构建
-        _remove_completed_build(running_builds, running_builds_lock, pipeline_iid, app_logger)
-        
-        # 对于canceled状态，不需要生成消息
+        # success/failed 时移除记录；canceled 时保留记录（供重新运行复用 message_id）
+        if status != 'canceled':
+            _remove_completed_build(running_builds, running_builds_lock, pipeline_iid, app_logger)
+
+        # canceled 状态生成取消卡片，更新已有卡片显示
         if status == 'canceled':
-            return None
+            formatted_commit_title = commit_title.replace('\n', '  \n')
+            elements = [
+                {
+                    'icon': 'member_outlined',
+                    'content': f"***提交人员***：{user_name}",
+                },
+                {
+                    'icon': 'time_outlined',
+                    'content': f"***开始时间***：{start_time}",
+                },
+                {
+                    'icon': 'mindnote_outlined',
+                    'content': f"***分      支***：{branch}",
+                },
+                {
+                    'icon': 'doc_outlined',
+                    'content': f"***Commit***：{formatted_commit_title}",
+                },
+            ]
+            message_config = {
+                'elements': elements,
+                'header': {
+                    'template': 'grey',
+                    'icon_token': None,
+                },
+            }
+            subtitle = f"Pipeline版本号：{pipeline_iid_prev if pipeline_iid_prev else pipeline_iid}"
+            text_tag_list = _build_text_tag_list(pipeline_id, pipeline_iid, source)
+            app_logger.info(f"message | format_output | project={project_name}, pipeline_iid={pipeline_iid}, status=canceled")
+            return _build_message(project_name, subtitle, detail_url, message_config, text_tag_list)
         
         # 计算持续时间
         duration = payload['object_attributes']['duration']

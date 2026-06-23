@@ -78,6 +78,7 @@ def main():
     ref = os.environ.get('REF', '')
     pipeline_iid = os.environ.get('PIPELINE_IID', '')
     nexus_url = os.environ.get('NEXUS_URL', '')
+    docker_registry_url = os.environ.get('DOCKER_REGISTRY_URL', '')
     nexus_user = os.environ.get('NEXUS_USER', '')
     nexus_password = os.environ.get('NEXUS_PASSWORD', '')
     minio_endpoint = os.environ.get('MINIO_ENDPOINT', '')
@@ -88,7 +89,7 @@ def main():
 
     print(f"=== wms-application deploy ===")
     print(f"PROJECTNAME={project_name}, REF={ref}, IID={iid}")
-    print(f"NEXUS_URL={nexus_url}, MINIO_ENDPOINT={minio_endpoint}")
+    print(f"NEXUS_URL={nexus_url}, DOCKER_REGISTRY_URL={docker_registry_url}, MINIO_ENDPOINT={minio_endpoint}")
 
     # 1. 查询 Nexus 匹配镜像
     image = search_docker_image(nexus_url, nexus_user, nexus_password, ref, iid)
@@ -96,11 +97,11 @@ def main():
         print(f"ERROR: 未找到分支 {ref} (iid={iid}) 对应的 Docker 镜像")
         sys.exit(1)
 
-    image_full = f"{nexus_url}/{image['name']}:{image['version']}"
+    image_full = f"{docker_registry_url}/{image['name']}:{image['version']}"
     print(f"找到镜像: {image_full} (iid={image['iid']}, match={image['reason']})")
 
     # 2. Docker login + pull + save
-    subprocess.run(['docker', 'login', nexus_url, '-u', nexus_user, '-p', nexus_password], check=True)
+    subprocess.run(['docker', 'login', docker_registry_url, '-u', nexus_user, '-p', nexus_password], check=True)
     subprocess.run(['docker', 'pull', image_full], check=True)
 
     image_tar = f"{project_name}_{ref}.tar"

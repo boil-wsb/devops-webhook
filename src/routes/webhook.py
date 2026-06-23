@@ -104,7 +104,7 @@ def process_webhook(request, route_name, subpath=None):
                 chat_id = ROUTE_CHAT_ID_MAP.get(route_name)
                 message_id = None
                 callback_id = None
-                if status in ['success', 'failed'] and running_builds and running_builds_lock:
+                if running_builds and running_builds_lock:
                     with running_builds_lock:
                         build_info = running_builds.get(payload['object_attributes'].get('iid'))
                         if build_info:
@@ -116,11 +116,6 @@ def process_webhook(request, route_name, subpath=None):
                 try:
                     message = format_message(payload, running_builds, running_builds_lock, route_name, push_records, push_records_lock)
                     if message:
-                        if status == 'running' and not callback_id and running_builds and running_builds_lock:
-                            with running_builds_lock:
-                                build_info = running_builds.get(payload['object_attributes'].get('iid'))
-                                if build_info:
-                                    callback_id = build_info.get('callback_id')
 
                         result = send_notification(route_name, message, chat_id=chat_id, message_id=message_id, callback_id=callback_id)
                         app_logger.info(f"webhook | send_result | route={route_name}, method={result.get('method')}, success={result.get('success')}")
