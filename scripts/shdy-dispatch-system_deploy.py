@@ -4,12 +4,15 @@
 import os
 import sys
 import re
-import subprocess
 import requests
 
+# 添加脚本目录到路径，导入公共工具
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from deploy_utils import ensure_dependencies, run_cmd, get_minio_client, upload_to_minio
 
-def search_docker_image(nexus_url, nexus_user, nexus_password, branch):
-    """在 Nexus docker-hosted 仓库中按分支名查找最新镜像"""
+
+def search_docker_image(nexus_url, nexus_user, nexus_password, branch, iid=None):
+    """在 Nexus docker-hosted 仓库中按分支名或 IID 查找镜像"""
     session = requests.Session()
     session.auth = (nexus_user, nexus_password)
 
@@ -27,12 +30,19 @@ def search_docker_image(nexus_url, nexus_user, nexus_password, branch):
         for item in data.get('items', []):
             name = item.get('name', '')
             version = item.get('version', '')
-            # 分支名匹配版本号
-            if branch in version:
-                # 提取 IID
-                iid_match = re.search(r'\.v\d+\.(\d+)$', version) or re.search(r'\.v(\d+)$', version)
-                iid = int(iid_match.group(1)) if iid_match else 0
-                matched.append({'name': name, 'version': version, 'iid': iid})
+            
+            # 提取 IID
+            comp_iid_match = re.search(r'\.v\d+\.(\d+)$', version) or re.search(r'\.v(\d+)$', version)
+            comp_iid = int(comp_iid_match.group(1)) if comp_iid_match else 0
+
+            # 规则1: IID 精确匹配
+            iid_match = (iid is not None and comp_iid == iid)
+            # 规则2: 分支名包含在版本号中
+            branch_match = branch in version
+
+            if iid_match or branch_match:
+                reason = 'IID' if iid_match else 'branch'
+                matched.append({'name': name, 'version': version, 'iid': comp_iid, 'reason': reason})
 
         continuation_token = data.get('continuationToken')
         if not continuation_token:
@@ -41,14 +51,18 @@ def search_docker_image(nexus_url, nexus_user, nexus_password, branch):
     if not matched:
         return None
 
-    # 按 IID 降序，取最新
-    matched.sort(key=lambda x: x['iid'], reverse=True)
+    # IID 匹配优先，其次按 IID 降序
+    matched.sort(key=lambda x: (0 if x['reason'] == 'IID' else 1, -x['iid']))
     return matched[0]
 
 
 def main():
+    # 检查依赖（只需要 docker，mc 已改用 Python 实现）
+    ensure_dependencies(['docker'])
+
     project_name = os.environ.get('PROJECTNAME', '')
     ref = os.environ.get('REF', '')
+    pipeline_iid = os.environ.get('PIPELINE_IID', '')
     nexus_url = os.environ.get('NEXUS_URL', '')
     docker_registry_url = os.environ.get('DOCKER_REGISTRY_URL', '')
     nexus_user = os.environ.get('NEXUS_USER', '')
@@ -56,39 +70,43 @@ def main():
     minio_endpoint = os.environ.get('MINIO_ENDPOINT', '')
     minio_access_key = os.environ.get('MINIO_ACCESS_KEY', '')
     minio_secret_key = os.environ.get('MINIO_SECRET_KEY', '')
+    minio_bucket = os.environ.get('MINIO_BUCKET', 'workorder')
+
+    iid = int(pipeline_iid) if pipeline_iid.isdigit() else None
 
     print(f"=== shdy-dispatch-system deploy ===")
-    print(f"PROJECTNAME={project_name}, REF={ref}")
+    print(f"PROJECTNAME={project_name}, REF={ref}, IID={iid}")
     print(f"NEXUS_URL={nexus_url}, DOCKER_REGISTRY_URL={docker_registry_url}, MINIO_ENDPOINT={minio_endpoint}")
 
     # 1. 查询 Nexus 匹配镜像
-    image = search_docker_image(nexus_url, nexus_user, nexus_password, ref)
+    image = search_docker_image(nexus_url, nexus_user, nexus_password, ref, iid)
     if not image:
-        print(f"ERROR: 未找到分支 {ref} 对应的 Docker 镜像")
+        print(f"ERROR: 未找到分支 {ref} (iid={iid}) 对应的 Docker 镜像")
         sys.exit(1)
 
     image_full = f"{docker_registry_url}/{image['name']}:{image['version']}"
-    print(f"找到镜像: {image_full} (iid={image['iid']})")
+    print(f"找到镜像: {image_full} (iid={image['iid']}, match={image['reason']})")
 
     # 2. Docker login + pull + save
-    subprocess.run(['docker', 'login', docker_registry_url, '-u', nexus_user, '-p', nexus_password], check=True)
-    subprocess.run(['docker', 'pull', image_full], check=True)
+    run_cmd(['docker', 'login', docker_registry_url, '-u', nexus_user, '-p', nexus_password])
+    run_cmd(['docker', 'pull', image_full])
 
     image_tar = f"{project_name}_{ref}.tar"
-    subprocess.run(['docker', 'save', '-o', image_tar, image_full], check=True)
+    run_cmd(['docker', 'save', '-o', image_tar, image_full])
     print(f"镜像已保存: {image_tar}")
 
-    # 3. 配置 mc 并上传到 MinIO
-    subprocess.run([
-        'mc', 'alias', 'set', 'minio',
-        f'http://{minio_endpoint}', minio_access_key, minio_secret_key, '--api', 's3v4'
-    ], check=True)
-
-    # TODO: 组装安装包并上传
-    # subprocess.run(['mc', 'cp', install_package, f'minio/BUCKET/PATH/'], check=True)
+    # 3. 使用 Python MinIO SDK 上传
+    if minio_endpoint and minio_access_key and minio_secret_key:
+        minio_client = get_minio_client(minio_endpoint, minio_access_key, minio_secret_key)
+        # TODO: 根据实际需求组装安装包并上传
+        # upload_to_minio(minio_client, minio_bucket, image_tar, f'docker/{project_name}/{os.path.basename(image_tar)}')
+        print(f"MinIO 上传逻辑已就绪（待配置具体路径）")
+    else:
+        print("提示: 未配置完整的 MinIO 信息，跳过上传")
 
     # 4. 清理
-    os.remove(image_tar)
+    if os.path.exists(image_tar):
+        os.remove(image_tar)
     print("部署完成")
 
 

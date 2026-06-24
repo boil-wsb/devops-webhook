@@ -7,6 +7,12 @@
 # - variables 中的变量会作为环境变量注入到执行环境中
 # - workorder: true → 触发前从 MinIO 下载 workorder/deploy.zip（MD5 一致则跳过）
 # - 修改此文件后自动热更新，无需重启服务
+#
+# 注意：本地执行 Docker 相关脚本需要：
+# 1. docker-compose.yml 中挂载 /var/run/docker.sock 和宿主机 docker 二进制
+#    - Docker 直接从宿主机挂载，无需在镜像内安装
+#    - MinIO 使用 Python SDK，无需 mc 命令
+# 2. 或者配置 ssh_host 通过 SSH 远程执行到有 Docker 环境的机器
 
 trigger_actions:
   # === iam 项目（SSH 远程执行） ===
@@ -22,7 +28,7 @@ trigger_actions:
       REPO_URL: "YOUR_REPO_URL"
       DEPLOY_DIR: "/opt/software/iam"
 
-  # === shdy-dispatch-system 项目（本地执行） ===
+  # === shdy-dispatch-system 项目（本地执行 Docker + Python MinIO） ===
   - name: "shdy-dispatch-system-deploy"
     project_pattern: "shdy-dispatch-system"
     workorder: true
@@ -36,11 +42,13 @@ trigger_actions:
       MINIO_ENDPOINT: "YOUR_MINIO_HOST:9000"
       MINIO_ACCESS_KEY: "YOUR_MINIO_ACCESS_KEY"
       MINIO_SECRET_KEY: "YOUR_MINIO_SECRET_KEY"
+      MINIO_BUCKET: "workorder"  # MinIO 存储桶名称（可选，默认 workorder）
       NEXUS_URL: "YOUR_NEXUS_HOST:8083"
+      DOCKER_REGISTRY_URL: "YOUR_NEXUS_HOST:8083"  # Docker 仓库地址
       NEXUS_USER: "YOUR_NEXUS_USER"
       NEXUS_PASSWORD: "YOUR_NEXUS_PASSWORD"
 
-  # === wms-application 项目（本地执行） ===
+  # === wms-application 项目（本地执行 Docker + Python MinIO） ===
   - name: "wms-application-deploy"
     project_pattern: "wms-application"
     workorder: true
@@ -54,11 +62,13 @@ trigger_actions:
       MINIO_ENDPOINT: "YOUR_MINIO_HOST:9000"
       MINIO_ACCESS_KEY: "YOUR_MINIO_ACCESS_KEY"
       MINIO_SECRET_KEY: "YOUR_MINIO_SECRET_KEY"
+      MINIO_BUCKET: "workorder"  # MinIO 存储桶名称（可选，默认 workorder）
       NEXUS_URL: "YOUR_NEXUS_HOST:8083"
+      DOCKER_REGISTRY_URL: "YOUR_NEXUS_HOST:8083"  # Docker 仓库地址
       NEXUS_USER: "YOUR_NEXUS_USER"
       NEXUS_PASSWORD: "YOUR_NEXUS_PASSWORD"
 
-  # === acre-web 项目（本地执行） ===
+  # === acre-web 项目（本地执行 + Python MinIO） ===
   - name: "acre-web-deploy"
     project_pattern: "acre-web"
     workorder: true
@@ -72,6 +82,7 @@ trigger_actions:
       MINIO_ENDPOINT: "YOUR_MINIO_HOST:9000"
       MINIO_ACCESS_KEY: "YOUR_MINIO_ACCESS_KEY"
       MINIO_SECRET_KEY: "YOUR_MINIO_SECRET_KEY"
+      MINIO_BUCKET: "workorder"  # MinIO 存储桶名称（可选，默认 workorder）
       NEXUS_URL: "YOUR_NEXUS_HOST:8083"
       NEXUS_USER: "YOUR_NEXUS_USER"
       NEXUS_PASSWORD: "YOUR_NEXUS_PASSWORD"

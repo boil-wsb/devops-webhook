@@ -12,6 +12,16 @@ services:
       - ./log:/app/logs
       - ./config/config.yaml:/app/config.yaml
       - ./data:/app/data
+      # 挂载宿主机 Docker socket，使容器内可以与宿主机 Docker 守护进程通信
+      - /var/run/docker.sock:/var/run/docker.sock
+      # 挂载宿主机 Docker 二进制（根据实际路径调整，以下是常见路径）
+      # Debian/Ubuntu/CentOS/RHEL 通常在 /usr/bin/docker
+      - /usr/bin/docker:/usr/bin/docker
+      # 如果宿主机 docker 在 /usr/local/bin/docker，请使用下面这行代替上面
+      # - /usr/local/bin/docker:/usr/bin/docker
+      # 如果需要挂载 docker 相关的库文件（某些动态编译版本可能需要），可以添加：
+      # - /usr/libexec/docker:/usr/libexec/docker
+      # - /usr/lib/docker:/usr/lib/docker
     restart: unless-stopped
     networks:
       - devops-net
