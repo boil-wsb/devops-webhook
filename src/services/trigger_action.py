@@ -4,6 +4,7 @@ import sys
 import threading
 import logging
 import yaml
+from datetime import datetime
 
 logger = logging.getLogger('app_logger')
 
@@ -13,6 +14,11 @@ WORKORDER_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', '
 
 _trigger_actions_cache = {'actions': None, 'mtime': 0}
 _trigger_actions_lock = threading.Lock()
+
+# 执行历史记录（内存存储，最多保留 200 条）
+_trigger_history = []
+_trigger_history_lock = threading.Lock()
+_TRIGGER_HISTORY_MAX = 200
 
 
 def _strip_ref_prefix(ref):
@@ -177,8 +183,10 @@ def _calc_md5(filepath):
     return md5.hexdigest()
 
 
-def _execute_local(action, path_with_namespace, ref, project_name, pipeline_iid=None):
+def _execute_local(action, path_with_namespace, ref, project_name, pipeline_iid=None, trigger_source='auto', start_time=None):
     import subprocess
+    if start_time is None:
+        start_time = datetime.now()
     name = action.get('name', 'unknown')
     script_name = action.get('script', '')
     variables = action.get('variables', {})
@@ -223,17 +231,19 @@ def _execute_local(action, path_with_namespace, ref, project_name, pipeline_iid=
         else:
             logger.error(f"trigger_action | local_result | action={name}, script={script_name}, exit_code={result.returncode}, stderr_len={len(error_output.strip())}, stdout_tail={(output or '').strip()[-500:]!r}")
 
-        _notify_result(name, project_name, ref, success, output, error_output, result.returncode, 'local', variables)
+        _notify_result(name, project_name, ref, success, output, error_output, result.returncode, 'local', variables, trigger_source, pipeline_iid, start_time)
     except subprocess.TimeoutExpired:
         logger.error(f"trigger_action | local_result | action={name}, script={script_name}, result=timeout")
-        _notify_result(name, project_name, ref, False, '', '本地执行超时(300s)', None, 'local', variables)
+        _notify_result(name, project_name, ref, False, '', '本地执行超时(300s)', None, 'local', variables, trigger_source, pipeline_iid, start_time)
     except Exception as e:
         logger.error(f"trigger_action | local_result | action={name}, script={script_name}, result=exception, error={e}")
-        _notify_result(name, project_name, ref, False, '', str(e), None, 'local', variables)
+        _notify_result(name, project_name, ref, False, '', str(e), None, 'local', variables, trigger_source, pipeline_iid, start_time)
 
 
-def _execute_ssh(action, path_with_namespace, ref, project_name, pipeline_iid=None):
+def _execute_ssh(action, path_with_namespace, ref, project_name, pipeline_iid=None, trigger_source='auto', start_time=None):
     import paramiko
+    if start_time is None:
+        start_time = datetime.now()
     name = action.get('name', 'unknown')
     host = action.get('ssh_host', '')
     port = action.get('ssh_port', 22)
@@ -288,26 +298,101 @@ def _execute_ssh(action, path_with_namespace, ref, project_name, pipeline_iid=No
             if script_name:
                 client.exec_command(f"rm -f {remote_script}")
 
-        _notify_result(name, project_name, ref, success, output, error_output, exit_code, host, variables)
+        _notify_result(name, project_name, ref, success, output, error_output, exit_code, host, variables, trigger_source, pipeline_iid, start_time)
     except paramiko.AuthenticationException:
         logger.error(f"trigger_action | ssh_result | action={name}, host={host}:{port}, result=auth_failed")
-        _notify_result(name, project_name, ref, False, '', f'SSH 认证失败: {user}@{host}:{port}', None, host, variables)
+        _notify_result(name, project_name, ref, False, '', f'SSH 认证失败: {user}@{host}:{port}', None, host, variables, trigger_source, pipeline_iid, start_time)
     except paramiko.SSHException as e:
         logger.error(f"trigger_action | ssh_result | action={name}, host={host}, result=ssh_exception, error={e}")
-        _notify_result(name, project_name, ref, False, '', f'SSH 连接异常: {e}', None, host, variables)
+        _notify_result(name, project_name, ref, False, '', f'SSH 连接异常: {e}', None, host, variables, trigger_source, pipeline_iid, start_time)
     except Exception as e:
         logger.error(f"trigger_action | ssh_result | action={name}, host={host}, result=exception, error={e}")
-        _notify_result(name, project_name, ref, False, '', str(e), None, host, variables)
+        _notify_result(name, project_name, ref, False, '', str(e), None, host, variables, trigger_source, pipeline_iid, start_time)
     finally:
         client.close()
 
 
-def _notify_result(action_name, project_name, ref, success, output='', error_output='', exit_code=None, ssh_host='', variables=None):
+def _notify_result(action_name, project_name, ref, success, output='', error_output='', exit_code=None, ssh_host='', variables=None, trigger_source='auto', pipeline_iid=None, start_time=None):
+    # 记录执行历史
+    _record_history(action_name, project_name, ref, success, output, error_output, exit_code, ssh_host, trigger_source, pipeline_iid, start_time)
     try:
         from src.services.feishu_notify import send_action_result
         send_action_result(action_name, project_name, ref, success, output, error_output, exit_code, ssh_host, variables)
     except Exception as e:
         logger.error(f"trigger_action | notify_failed | error={e}")
+
+
+def _record_history(action_name, project_name, ref, success, output, error_output, exit_code, ssh_host, trigger_source, pipeline_iid, start_time):
+    """记录执行历史到内存列表"""
+    end_time = datetime.now()
+    duration = (end_time - start_time).total_seconds() if start_time else 0
+    record = {
+        'action_name': action_name,
+        'project_name': project_name,
+        'ref': ref,
+        'pipeline_iid': pipeline_iid,
+        'success': success,
+        'exit_code': exit_code,
+        'start_time': start_time.strftime('%Y-%m-%d %H:%M:%S') if start_time else '',
+        'end_time': end_time.strftime('%Y-%m-%d %H:%M:%S'),
+        'duration': round(duration, 1),
+        'output_tail': (output or '').strip()[-500:] if output else '',
+        'error_tail': (error_output or '').strip()[-500:] if error_output else '',
+        'ssh_host': ssh_host or 'local',
+        'trigger_source': trigger_source,
+    }
+    with _trigger_history_lock:
+        _trigger_history.insert(0, record)
+        if len(_trigger_history) > _TRIGGER_HISTORY_MAX:
+            _trigger_history.pop()
+
+
+def get_trigger_actions_config():
+    """获取当前 trigger_actions 配置（从内存缓存）"""
+    actions = _load_trigger_actions()
+    result = []
+    for action in actions:
+        result.append({
+            'name': action.get('name', ''),
+            'project_pattern': action.get('project_pattern', ''),
+            'ref_pattern': action.get('ref_pattern', ''),
+            'ref_patterns': action.get('ref_patterns', []),
+            'script': action.get('script', ''),
+            'ssh_host': action.get('ssh_host', ''),
+            'ssh_port': action.get('ssh_port', 22),
+            'workorder': action.get('workorder', False),
+            'variables_keys': list(action.get('variables', {}).keys()) if action.get('variables') else [],
+        })
+    return result
+
+
+def get_trigger_history(limit=50):
+    """获取执行历史记录"""
+    with _trigger_history_lock:
+        return _trigger_history[:limit]
+
+
+def manual_trigger(action_name, ref='', pipeline_iid=None):
+    """手动触发某个 action"""
+    actions = _load_trigger_actions()
+    action = next((a for a in actions if a.get('name') == action_name), None)
+    if not action:
+        return {'success': False, 'message': f'未找到 action: {action_name}'}
+
+    project_pattern = action.get('project_pattern', '')
+    path_with_namespace = project_pattern
+    project_name = project_pattern.split('/')[-1] if '/' in project_pattern else project_pattern
+
+    has_ssh = action.get('ssh_host')
+    target = _execute_ssh if has_ssh else _execute_local
+
+    def _wrapped():
+        _start = datetime.now()
+        target(action, path_with_namespace, ref, project_name, pipeline_iid, trigger_source='manual', start_time=_start)
+
+    thread = threading.Thread(target=_wrapped, daemon=True)
+    thread.start()
+    return {'success': True, 'message': f'已触发 action: {action_name}'}
 
 
 def check_and_trigger(path_with_namespace, ref, project_name='', pipeline_iid=None):

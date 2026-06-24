@@ -1,0 +1,1692 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Trigger Actions 管理</title>
+    <link rel="icon" type="image/x-icon" href="{{ url_for('static', filename='favicon.ico') }}">
+    <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}">
+    <style>
+        /* ============================================
+           Trigger Actions 页面专属样式
+           ============================================ */
+        .ta-container {
+            max-width: 1400px;
+            margin: 0 auto;
+        }
+
+        /* 流程图区域 */
+        .flow-section {
+            background-color: var(--card-bg);
+            border-radius: var(--radius-xl);
+            box-shadow: var(--shadow-sm);
+            border: 1px solid var(--border-color);
+            padding: var(--space-6);
+            margin-bottom: var(--space-6);
+        }
+
+        .section-title {
+            display: flex;
+            align-items: center;
+            gap: var(--space-2);
+            font-size: 1.125rem;
+            font-weight: 600;
+            color: var(--text-color);
+            margin-bottom: var(--space-5);
+        }
+
+        .section-title svg {
+            color: var(--primary-500);
+        }
+
+        .flow-diagram {
+            display: flex;
+            align-items: stretch;
+            gap: var(--space-2);
+            overflow-x: auto;
+            padding-bottom: var(--space-2);
+        }
+
+        .flow-diagram::-webkit-scrollbar {
+            height: 6px;
+        }
+
+        .flow-diagram::-webkit-scrollbar-track {
+            background: var(--gray-100);
+            border-radius: var(--radius-full);
+        }
+
+        .flow-diagram::-webkit-scrollbar-thumb {
+            background: var(--gray-300);
+            border-radius: var(--radius-full);
+        }
+
+        [data-theme="dark"] .flow-diagram::-webkit-scrollbar-track {
+            background: var(--gray-700);
+        }
+
+        [data-theme="dark"] .flow-diagram::-webkit-scrollbar-thumb {
+            background: var(--gray-500);
+        }
+
+        .flow-node {
+            flex: 1;
+            min-width: 160px;
+            background: linear-gradient(135deg, var(--card-bg) 0%, var(--bg-color) 100%);
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-lg);
+            padding: var(--space-4);
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: var(--space-2);
+            text-align: center;
+            transition: all var(--transition-normal);
+            position: relative;
+            animation: slideUp 0.4s ease-out backwards;
+        }
+
+        .flow-node:nth-child(1) { animation-delay: 0.05s; }
+        .flow-node:nth-child(3) { animation-delay: 0.1s; }
+        .flow-node:nth-child(5) { animation-delay: 0.15s; }
+        .flow-node:nth-child(7) { animation-delay: 0.2s; }
+        .flow-node:nth-child(9) { animation-delay: 0.25s; }
+
+        .flow-node:hover {
+            transform: translateY(-4px);
+            box-shadow: var(--shadow-md);
+            border-color: var(--primary-300);
+        }
+
+        [data-theme="dark"] .flow-node:hover {
+            border-color: var(--primary-700);
+        }
+
+        .flow-node-icon {
+            width: 44px;
+            height: 44px;
+            border-radius: var(--radius-full);
+            background: linear-gradient(135deg, var(--primary-500), var(--primary-700));
+            color: white;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            box-shadow: var(--shadow-sm);
+            flex-shrink: 0;
+        }
+
+        .flow-node.optional .flow-node-icon {
+            background: linear-gradient(135deg, var(--warning-500), var(--warning-600));
+        }
+
+        .flow-node.notify .flow-node-icon {
+            background: linear-gradient(135deg, var(--success-500), var(--success-600));
+        }
+
+        .flow-node-title {
+            font-weight: 600;
+            font-size: 0.875rem;
+            color: var(--text-color);
+            line-height: 1.3;
+        }
+
+        .flow-node-desc {
+            font-size: 0.75rem;
+            color: var(--text-secondary);
+            line-height: 1.4;
+        }
+
+        .flow-node-badge {
+            position: absolute;
+            top: -8px;
+            right: -8px;
+            background: var(--warning-500);
+            color: white;
+            font-size: 0.6875rem;
+            font-weight: 600;
+            padding: 2px var(--space-2);
+            border-radius: var(--radius-full);
+            box-shadow: var(--shadow-sm);
+        }
+
+        .flow-arrow {
+            display: flex;
+            align-items: center;
+            color: var(--text-tertiary);
+            flex-shrink: 0;
+            align-self: center;
+        }
+
+        .flow-arrow svg {
+            animation: pulse 2s infinite;
+        }
+
+        /* Action 卡片网格 */
+        .actions-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(380px, 1fr));
+            gap: var(--space-5);
+        }
+
+        .action-card {
+            background-color: var(--card-bg);
+            border-radius: var(--radius-xl);
+            box-shadow: var(--shadow-sm);
+            border: 1px solid var(--border-color);
+            padding: var(--space-5);
+            transition: all var(--transition-normal);
+            display: flex;
+            flex-direction: column;
+            position: relative;
+            overflow: hidden;
+            animation: slideUp 0.4s ease-out backwards;
+        }
+
+        .action-card::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            height: 3px;
+            background: linear-gradient(90deg, var(--primary-400), var(--primary-600));
+            opacity: 0;
+            transition: opacity var(--transition-normal);
+        }
+
+        .action-card:hover {
+            transform: translateY(-3px);
+            box-shadow: var(--shadow-lg);
+            border-color: var(--primary-200);
+        }
+
+        .action-card:hover::before {
+            opacity: 1;
+        }
+
+        [data-theme="dark"] .action-card:hover {
+            border-color: var(--primary-700);
+        }
+
+        .action-card-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-start;
+            gap: var(--space-3);
+            margin-bottom: var(--space-4);
+            padding-bottom: var(--space-3);
+            border-bottom: 1px solid var(--border-color);
+        }
+
+        .action-name {
+            font-size: 1.0625rem;
+            font-weight: 600;
+            color: var(--text-color);
+            word-break: break-word;
+            line-height: 1.3;
+            display: flex;
+            align-items: center;
+            gap: var(--space-2);
+        }
+
+        .action-name svg {
+            color: var(--primary-500);
+            flex-shrink: 0;
+        }
+
+        .action-mode-badge {
+            display: inline-flex;
+            align-items: center;
+            gap: var(--space-1);
+            padding: var(--space-1) var(--space-2);
+            border-radius: var(--radius-full);
+            font-size: 0.6875rem;
+            font-weight: 600;
+            flex-shrink: 0;
+            white-space: nowrap;
+        }
+
+        .mode-ssh {
+            background-color: rgba(59, 130, 246, 0.15);
+            color: var(--primary-600);
+        }
+
+        [data-theme="dark"] .mode-ssh {
+            color: var(--primary-300);
+        }
+
+        .mode-local {
+            background-color: rgba(16, 185, 129, 0.15);
+            color: var(--success-600);
+        }
+
+        [data-theme="dark"] .mode-local {
+            color: var(--success-400);
+        }
+
+        .action-field {
+            display: flex;
+            gap: var(--space-2);
+            margin-bottom: var(--space-2);
+            align-items: baseline;
+            font-size: 0.8125rem;
+        }
+
+        .action-field-label {
+            min-width: 70px;
+            color: var(--text-secondary);
+            font-weight: 500;
+            flex-shrink: 0;
+        }
+
+        .action-field-value {
+            color: var(--text-color);
+            word-break: break-all;
+            flex: 1;
+            font-family: var(--font-mono);
+            font-size: 0.8125rem;
+        }
+
+        .ref-tags {
+            display: flex;
+            flex-wrap: wrap;
+            gap: var(--space-1);
+            align-items: center;
+            flex: 1;
+        }
+
+        .ref-tag {
+            background-color: var(--warning-100);
+            color: var(--warning-600);
+            padding: 2px var(--space-2);
+            border-radius: var(--radius-sm);
+            font-size: 0.6875rem;
+            font-weight: 500;
+            font-family: var(--font-mono);
+            border: 1px solid transparent;
+        }
+
+        [data-theme="dark"] .ref-tag {
+            background-color: rgba(245, 158, 11, 0.15);
+            color: var(--warning-400);
+        }
+
+        .workorder-tag {
+            display: inline-flex;
+            align-items: center;
+            gap: var(--space-1);
+            background-color: var(--warning-500);
+            color: white;
+            padding: 2px var(--space-2);
+            border-radius: var(--radius-full);
+            font-size: 0.6875rem;
+            font-weight: 600;
+            box-shadow: var(--shadow-xs);
+        }
+
+        .var-keys {
+            display: flex;
+            flex-wrap: wrap;
+            gap: var(--space-1);
+            align-items: center;
+            flex: 1;
+        }
+
+        .var-key {
+            background-color: var(--gray-100);
+            color: var(--text-secondary);
+            padding: 2px var(--space-2);
+            border-radius: var(--radius-sm);
+            font-size: 0.6875rem;
+            font-family: var(--font-mono);
+            border: 1px solid var(--border-color);
+        }
+
+        [data-theme="dark"] .var-key {
+            background-color: var(--gray-700);
+            color: var(--text-secondary);
+        }
+
+        .action-card-footer {
+            margin-top: auto;
+            padding-top: var(--space-3);
+            border-top: 1px solid var(--border-color);
+            display: flex;
+            justify-content: flex-end;
+            gap: var(--space-2);
+        }
+
+        .trigger-btn {
+            display: inline-flex;
+            align-items: center;
+            gap: var(--space-2);
+            padding: var(--space-2) var(--space-4);
+            background: linear-gradient(135deg, var(--primary-500), var(--primary-600));
+            color: white;
+            border: none;
+            border-radius: var(--radius-md);
+            font-size: 0.8125rem;
+            font-weight: 500;
+            cursor: pointer;
+            transition: all var(--transition-fast);
+            box-shadow: var(--shadow-sm);
+        }
+
+        .trigger-btn:hover {
+            transform: translateY(-1px);
+            box-shadow: var(--shadow-md);
+            background: linear-gradient(135deg, var(--primary-600), var(--primary-700));
+        }
+
+        .trigger-btn:active {
+            transform: translateY(0);
+        }
+
+        .trigger-btn:disabled {
+            opacity: 0.6;
+            cursor: not-allowed;
+            transform: none;
+        }
+
+        /* 历史记录表格 */
+        .history-section {
+            background-color: var(--card-bg);
+            border-radius: var(--radius-xl);
+            box-shadow: var(--shadow-sm);
+            border: 1px solid var(--border-color);
+            overflow: hidden;
+        }
+
+        .history-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: var(--space-5) var(--space-6);
+            border-bottom: 1px solid var(--border-color);
+            flex-wrap: wrap;
+            gap: var(--space-3);
+        }
+
+        .history-header-left {
+            display: flex;
+            align-items: center;
+            gap: var(--space-3);
+        }
+
+        .auto-refresh-toggle {
+            display: inline-flex;
+            align-items: center;
+            gap: var(--space-2);
+            padding: var(--space-1) var(--space-3);
+            background-color: var(--bg-color);
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-full);
+            font-size: 0.75rem;
+            color: var(--text-secondary);
+            cursor: pointer;
+            transition: all var(--transition-fast);
+        }
+
+        .auto-refresh-toggle.active {
+            background-color: rgba(16, 185, 129, 0.1);
+            border-color: var(--success-500);
+            color: var(--success-600);
+        }
+
+        [data-theme="dark"] .auto-refresh-toggle.active {
+            color: var(--success-400);
+        }
+
+        .auto-refresh-dot {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            background-color: var(--gray-400);
+            transition: all var(--transition-fast);
+        }
+
+        .auto-refresh-toggle.active .auto-refresh-dot {
+            background-color: var(--success-500);
+            animation: pulse 2s infinite;
+        }
+
+        .history-table-wrapper {
+            overflow-x: auto;
+        }
+
+        .history-table {
+            width: 100%;
+            border-collapse: separate;
+            border-spacing: 0;
+            font-size: 0.8125rem;
+        }
+
+        .history-table th {
+            background: linear-gradient(to bottom, var(--gray-50), var(--gray-100));
+            color: var(--text-color);
+            font-weight: 600;
+            text-transform: uppercase;
+            font-size: 0.6875rem;
+            letter-spacing: 0.05em;
+            padding: var(--space-3) var(--space-4);
+            text-align: left;
+            white-space: nowrap;
+            border-bottom: 1px solid var(--border-color);
+            position: sticky;
+            top: 0;
+            z-index: 1;
+        }
+
+        [data-theme="dark"] .history-table th {
+            background: linear-gradient(to bottom, var(--gray-700), var(--gray-800));
+        }
+
+        .history-table td {
+            padding: var(--space-3) var(--space-4);
+            border-bottom: 1px solid var(--border-color);
+            color: var(--text-color);
+            vertical-align: middle;
+        }
+
+        .history-table tbody tr {
+            transition: background-color var(--transition-fast);
+        }
+
+        .history-table tbody tr:hover {
+            background-color: var(--primary-50);
+        }
+
+        [data-theme="dark"] .history-table tbody tr:hover {
+            background-color: rgba(59, 130, 246, 0.1);
+        }
+
+        .history-table tbody tr.row-success {
+            border-left: 3px solid var(--success-500);
+        }
+
+        .history-table tbody tr.row-failed {
+            border-left: 3px solid var(--error-500);
+        }
+
+        .history-table tbody tr:last-child td {
+            border-bottom: none;
+        }
+
+        .history-table .mono {
+            font-family: var(--font-mono);
+            font-size: 0.75rem;
+        }
+
+        .source-badge {
+            display: inline-flex;
+            align-items: center;
+            gap: var(--space-1);
+            padding: 2px var(--space-2);
+            border-radius: var(--radius-full);
+            font-size: 0.6875rem;
+            font-weight: 500;
+        }
+
+        .source-auto {
+            background-color: rgba(59, 130, 246, 0.15);
+            color: var(--primary-600);
+        }
+
+        [data-theme="dark"] .source-auto {
+            color: var(--primary-300);
+        }
+
+        .source-manual {
+            background-color: rgba(249, 115, 22, 0.15);
+            color: var(--tag-user);
+        }
+
+        .view-log-btn {
+            display: inline-flex;
+            align-items: center;
+            gap: var(--space-1);
+            padding: var(--space-1) var(--space-3);
+            background-color: var(--card-bg);
+            color: var(--primary-600);
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-md);
+            font-size: 0.75rem;
+            font-weight: 500;
+            cursor: pointer;
+            transition: all var(--transition-fast);
+            white-space: nowrap;
+        }
+
+        .view-log-btn:hover {
+            background-color: var(--primary-50);
+            border-color: var(--primary-300);
+            color: var(--primary-700);
+        }
+
+        [data-theme="dark"] .view-log-btn {
+            color: var(--primary-400);
+        }
+
+        [data-theme="dark"] .view-log-btn:hover {
+            background-color: var(--primary-900);
+            border-color: var(--primary-700);
+            color: var(--primary-300);
+        }
+
+        /* 手动触发模态框 */
+        .trigger-modal-content {
+            max-width: 480px;
+        }
+
+        .form-group {
+            margin-bottom: var(--space-4);
+        }
+
+        .form-group label {
+            display: block;
+            font-size: 0.875rem;
+            font-weight: 500;
+            color: var(--text-color);
+            margin-bottom: var(--space-2);
+        }
+
+        .form-group label .required {
+            color: var(--error-500);
+            margin-left: 2px;
+        }
+
+        .form-group label .optional {
+            color: var(--text-tertiary);
+            font-weight: 400;
+            font-size: 0.75rem;
+            margin-left: var(--space-1);
+        }
+
+        .form-input {
+            width: 100%;
+            padding: var(--space-3) var(--space-4);
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-md);
+            font-size: 0.875rem;
+            background-color: var(--bg-color);
+            color: var(--text-color);
+            transition: all var(--transition-fast);
+            box-sizing: border-box;
+        }
+
+        .form-input:focus {
+            outline: none;
+            border-color: var(--primary-400);
+            box-shadow: 0 0 0 3px var(--primary-100);
+        }
+
+        [data-theme="dark"] .form-input:focus {
+            box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.2);
+        }
+
+        .form-input::placeholder {
+            color: var(--text-tertiary);
+        }
+
+        .form-hint {
+            font-size: 0.75rem;
+            color: var(--text-secondary);
+            margin-top: var(--space-1);
+        }
+
+        .modal-actions {
+            display: flex;
+            justify-content: flex-end;
+            gap: var(--space-3);
+            margin-top: var(--space-5);
+            padding-top: var(--space-4);
+            border-top: 1px solid var(--border-color);
+        }
+
+        .btn-cancel {
+            background-color: var(--card-bg);
+            color: var(--text-color);
+            border: 1px solid var(--border-color);
+            padding: var(--space-2) var(--space-5);
+            border-radius: var(--radius-md);
+            font-size: 0.875rem;
+            font-weight: 500;
+            cursor: pointer;
+            transition: all var(--transition-fast);
+        }
+
+        .btn-cancel:hover {
+            background-color: var(--gray-100);
+        }
+
+        [data-theme="dark"] .btn-cancel:hover {
+            background-color: var(--gray-700);
+        }
+
+        .btn-confirm {
+            background: linear-gradient(135deg, var(--primary-500), var(--primary-600));
+            color: white;
+            border: none;
+            padding: var(--space-2) var(--space-5);
+            border-radius: var(--radius-md);
+            font-size: 0.875rem;
+            font-weight: 500;
+            cursor: pointer;
+            transition: all var(--transition-fast);
+            box-shadow: var(--shadow-sm);
+        }
+
+        .btn-confirm:hover {
+            transform: translateY(-1px);
+            box-shadow: var(--shadow-md);
+            background: linear-gradient(135deg, var(--primary-600), var(--primary-700));
+        }
+
+        .btn-confirm:disabled {
+            opacity: 0.6;
+            cursor: not-allowed;
+            transform: none;
+        }
+
+        /* 日志模态框 */
+        .log-modal-content {
+            max-width: 900px;
+        }
+
+        .log-section-block {
+            margin-bottom: var(--space-4);
+        }
+
+        .log-section-header {
+            display: flex;
+            align-items: center;
+            gap: var(--space-2);
+            font-size: 0.8125rem;
+            font-weight: 600;
+            margin-bottom: var(--space-2);
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+        }
+
+        .log-section-header.stdout {
+            color: var(--success-600);
+        }
+
+        [data-theme="dark"] .log-section-header.stdout {
+            color: var(--success-400);
+        }
+
+        .log-section-header.stderr {
+            color: var(--error-600);
+        }
+
+        [data-theme="dark"] .log-section-header.stderr {
+            color: var(--error-400);
+        }
+
+        .log-pre {
+            margin: 0;
+            padding: var(--space-4);
+            border-radius: var(--radius-md);
+            font-family: var(--font-mono);
+            font-size: 0.75rem;
+            line-height: 1.6;
+            white-space: pre-wrap;
+            word-wrap: break-word;
+            overflow-wrap: break-word;
+            max-height: 280px;
+            overflow-y: auto;
+        }
+
+        .log-pre.stdout {
+            background-color: rgba(16, 185, 129, 0.08);
+            border: 1px solid rgba(16, 185, 129, 0.2);
+            color: var(--success-700);
+        }
+
+        [data-theme="dark"] .log-pre.stdout {
+            background-color: rgba(16, 185, 129, 0.1);
+            border-color: rgba(16, 185, 129, 0.3);
+            color: var(--success-300);
+        }
+
+        .log-pre.stderr {
+            background-color: rgba(239, 68, 68, 0.08);
+            border: 1px solid rgba(239, 68, 68, 0.2);
+            color: var(--error-700);
+        }
+
+        [data-theme="dark"] .log-pre.stderr {
+            background-color: rgba(239, 68, 68, 0.1);
+            border-color: rgba(239, 68, 68, 0.3);
+            color: var(--error-300);
+        }
+
+        .log-pre::-webkit-scrollbar {
+            width: 6px;
+        }
+
+        .log-pre::-webkit-scrollbar-track {
+            background: transparent;
+        }
+
+        .log-pre::-webkit-scrollbar-thumb {
+            background: var(--gray-400);
+            border-radius: var(--radius-full);
+        }
+
+        .log-empty {
+            text-align: center;
+            padding: var(--space-4);
+            color: var(--text-tertiary);
+            font-size: 0.8125rem;
+            font-style: italic;
+        }
+
+        /* Toast 提示 */
+        .toast {
+            position: fixed;
+            top: var(--space-6);
+            right: var(--space-6);
+            padding: var(--space-3) var(--space-5);
+            border-radius: var(--radius-md);
+            box-shadow: var(--shadow-lg);
+            font-size: 0.875rem;
+            font-weight: 500;
+            z-index: var(--z-toast);
+            display: flex;
+            align-items: center;
+            gap: var(--space-2);
+            transform: translateX(120%);
+            transition: transform var(--transition-normal);
+            max-width: 400px;
+        }
+
+        .toast.show {
+            transform: translateX(0);
+        }
+
+        .toast.success {
+            background-color: var(--success-500);
+            color: white;
+        }
+
+        .toast.error {
+            background-color: var(--error-500);
+            color: white;
+        }
+
+        .toast.info {
+            background-color: var(--primary-500);
+            color: white;
+        }
+
+        /* 空状态 */
+        .empty-state {
+            text-align: center;
+            padding: var(--space-10) var(--space-6);
+            color: var(--text-secondary);
+        }
+
+        .empty-state svg {
+            color: var(--text-tertiary);
+            margin-bottom: var(--space-3);
+        }
+
+        .empty-state-title {
+            font-size: 1rem;
+            font-weight: 600;
+            color: var(--text-color);
+            margin-bottom: var(--space-1);
+        }
+
+        .empty-state-desc {
+            font-size: 0.8125rem;
+            color: var(--text-secondary);
+        }
+
+        /* 响应式 */
+        @media (max-width: 992px) {
+            .actions-grid {
+                grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+            }
+        }
+
+        @media (max-width: 768px) {
+            .actions-grid {
+                grid-template-columns: 1fr;
+            }
+
+            .flow-diagram {
+                flex-direction: column;
+            }
+
+            .flow-arrow {
+                transform: rotate(90deg);
+            }
+
+            .history-table {
+                display: block;
+                overflow-x: auto;
+                white-space: nowrap;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="ta-container">
+        <!-- 顶部导航栏 -->
+        <header class="page-header">
+            <h1>Trigger Actions 管理</h1>
+            <div class="header-actions">
+                <a href="/pipelines/records/view" class="page-nav-btn" title="返回首页">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <line x1="19" y1="12" x2="5" y2="12"></line>
+                        <polyline points="12 19 5 12 12 5"></polyline>
+                    </svg>
+                    返回首页
+                </a>
+                <button class="page-nav-btn" onclick="toggleTheme()" id="themeToggleBtn" title="切换主题">
+                    <span id="themeIconWrap"></span>
+                    <span id="themeText">深色模式</span>
+                </button>
+                <button class="page-nav-btn" onclick="refreshAll()" title="刷新数据">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" id="refreshIcon">
+                        <polyline points="23 4 23 10 17 10"></polyline>
+                        <path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"></path>
+                    </svg>
+                    刷新
+                </button>
+            </div>
+        </header>
+
+        <!-- 说明 -->
+        <div class="note">
+            <strong>说明：</strong>Pipeline 成功后自动触发的部署动作。可在此查看配置、执行历史，并支持手动触发。
+        </div>
+
+        <!-- 流程图区域 -->
+        <section class="flow-section">
+            <div class="section-title">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <polyline points="22 12 18 12 15 21 9 3 6 12 2 12"></polyline>
+                </svg>
+                触发流程
+            </div>
+            <div class="flow-diagram">
+                <div class="flow-node">
+                    <div class="flow-node-icon">
+                        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                            <polyline points="20 6 9 17 4 12"></polyline>
+                        </svg>
+                    </div>
+                    <div class="flow-node-title">Pipeline 成功</div>
+                    <div class="flow-node-desc">构建流水线成功完成</div>
+                </div>
+                <div class="flow-arrow">
+                    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <line x1="5" y1="12" x2="19" y2="12"></line>
+                        <polyline points="12 5 19 12 12 19"></polyline>
+                    </svg>
+                </div>
+                <div class="flow-node">
+                    <div class="flow-node-icon">
+                        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                            <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
+                            <polyline points="14 2 14 8 20 8"></polyline>
+                            <line x1="16" y1="13" x2="8" y2="13"></line>
+                            <line x1="16" y1="17" x2="8" y2="17"></line>
+                        </svg>
+                    </div>
+                    <div class="flow-node-title">匹配配置</div>
+                    <div class="flow-node-desc">trigger_actions.yaml</div>
+                </div>
+                <div class="flow-arrow">
+                    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <line x1="5" y1="12" x2="19" y2="12"></line>
+                        <polyline points="12 5 19 12 12 19"></polyline>
+                    </svg>
+                </div>
+                <div class="flow-node optional">
+                    <span class="flow-node-badge">可选</span>
+                    <div class="flow-node-icon">
+                        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+                            <polyline points="7 10 12 15 17 10"></polyline>
+                            <line x1="12" y1="15" x2="12" y2="3"></line>
+                        </svg>
+                    </div>
+                    <div class="flow-node-title">Workorder 下载</div>
+                    <div class="flow-node-desc">从 MinIO 拉取部署包</div>
+                </div>
+                <div class="flow-arrow">
+                    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <line x1="5" y1="12" x2="19" y2="12"></line>
+                        <polyline points="12 5 19 12 12 19"></polyline>
+                    </svg>
+                </div>
+                <div class="flow-node">
+                    <div class="flow-node-icon">
+                        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                            <polyline points="4 17 10 11 4 5"></polyline>
+                            <line x1="12" y1="19" x2="20" y2="19"></line>
+                        </svg>
+                    </div>
+                    <div class="flow-node-title">执行脚本</div>
+                    <div class="flow-node-desc">本地 / SSH 远程</div>
+                </div>
+                <div class="flow-arrow">
+                    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <line x1="5" y1="12" x2="19" y2="12"></line>
+                        <polyline points="12 5 19 12 12 19"></polyline>
+                    </svg>
+                </div>
+                <div class="flow-node notify">
+                    <div class="flow-node-icon">
+                        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                            <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"></path>
+                            <path d="M13.73 21a2 2 0 0 1-3.46 0"></path>
+                        </svg>
+                    </div>
+                    <div class="flow-node-title">飞书通知</div>
+                    <div class="flow-node-desc">推送执行结果</div>
+                </div>
+            </div>
+        </section>
+
+        <!-- Action 配置列表 -->
+        <section class="flow-section">
+            <div class="section-title">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <rect x="3" y="3" width="7" height="7"></rect>
+                    <rect x="14" y="3" width="7" height="7"></rect>
+                    <rect x="14" y="14" width="7" height="7"></rect>
+                    <rect x="3" y="14" width="7" height="7"></rect>
+                </svg>
+                Action 配置
+                <span id="actionsCount" style="margin-left: auto; font-size: 0.8125rem; color: var(--text-secondary); font-weight: 400;"></span>
+            </div>
+            <div id="actionsContainer" class="actions-grid">
+                <div class="empty-state">
+                    <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+                        <polyline points="23 4 23 10 17 10"></polyline>
+                        <path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"></path>
+                    </svg>
+                    <div class="empty-state-title">加载中...</div>
+                    <div class="empty-state-desc">正在获取 Action 配置</div>
+                </div>
+            </div>
+        </section>
+
+        <!-- 执行历史记录 -->
+        <section class="history-section">
+            <div class="history-header">
+                <div class="history-header-left">
+                    <div class="section-title" style="margin-bottom: 0;">
+                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                            <circle cx="12" cy="12" r="10"></circle>
+                            <polyline points="12 6 12 12 16 14"></polyline>
+                        </svg>
+                        执行历史
+                    </div>
+                    <span id="historyCount" style="font-size: 0.8125rem; color: var(--text-secondary);"></span>
+                </div>
+                <button class="auto-refresh-toggle active" id="autoRefreshToggle" onclick="toggleAutoRefresh()">
+                    <span class="auto-refresh-dot"></span>
+                    <span id="autoRefreshText">自动刷新 (10s)</span>
+                </button>
+            </div>
+            <div class="history-table-wrapper">
+                <table class="history-table" id="historyTable">
+                    <thead>
+                        <tr>
+                            <th>Action</th>
+                            <th>项目</th>
+                            <th>分支</th>
+                            <th>IID</th>
+                            <th>状态</th>
+                            <th>耗时(s)</th>
+                            <th>开始时间</th>
+                            <th>结束时间</th>
+                            <th>来源</th>
+                            <th>执行位置</th>
+                            <th>操作</th>
+                        </tr>
+                    </thead>
+                    <tbody id="historyBody">
+                        <tr>
+                            <td colspan="11" class="empty-state">
+                                <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+                                    <polyline points="23 4 23 10 17 10"></polyline>
+                                    <path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"></path>
+                                </svg>
+                                <div class="empty-state-title">加载中...</div>
+                                <div class="empty-state-desc">正在获取执行历史</div>
+                            </td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+        </section>
+    </div>
+
+    <!-- 手动触发模态框 -->
+    <div id="triggerModal" class="modal">
+        <div class="modal-content trigger-modal-content">
+            <div class="modal-header">
+                <h2>
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align: middle; margin-right: 8px; color: var(--primary-500);">
+                        <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"></polygon>
+                    </svg>
+                    手动触发 Action
+                </h2>
+                <button class="close" onclick="closeTriggerModal()">&times;</button>
+            </div>
+            <div style="margin-bottom: var(--space-4); padding: var(--space-3) var(--space-4); background-color: var(--primary-50); border-radius: var(--radius-md); border-left: 3px solid var(--primary-500);">
+                <div style="font-size: 0.75rem; color: var(--text-secondary); margin-bottom: 2px;">Action 名称</div>
+                <div id="triggerActionName" style="font-weight: 600; color: var(--text-color); font-size: 0.9375rem;"></div>
+            </div>
+            <div class="form-group">
+                <label for="triggerRef">分支名 (ref)<span class="required">*</span></label>
+                <input type="text" id="triggerRef" class="form-input" placeholder="例如：dev-bulk、main" autocomplete="off">
+                <div class="form-hint">必填，将作为 REF 环境变量传入脚本</div>
+            </div>
+            <div class="form-group">
+                <label for="triggerIid">Pipeline IID<span class="optional">(可选)</span></label>
+                <input type="number" id="triggerIid" class="form-input" placeholder="例如：123" autocomplete="off">
+                <div class="form-hint">可选，将作为 PIPELINE_IID 环境变量传入脚本</div>
+            </div>
+            <div class="modal-actions">
+                <button class="btn-cancel" onclick="closeTriggerModal()">取消</button>
+                <button class="btn-confirm" id="confirmTriggerBtn" onclick="submitTrigger()">确认触发</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- 日志查看模态框 -->
+    <div id="logModal" class="modal">
+        <div class="modal-content log-modal-content">
+            <div class="modal-header">
+                <h2 id="logModalTitle">执行日志</h2>
+                <button class="close" onclick="closeLogModal()">&times;</button>
+            </div>
+            <div id="logModalMeta" style="margin-bottom: var(--space-4); display: flex; flex-wrap: wrap; gap: var(--space-3); font-size: 0.8125rem; color: var(--text-secondary);"></div>
+            <div class="log-section-block">
+                <div class="log-section-header stdout">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <polyline points="4 17 10 11 4 5"></polyline>
+                        <line x1="12" y1="19" x2="20" y2="19"></line>
+                    </svg>
+                    STDOUT (output_tail)
+                </div>
+                <pre id="logStdout" class="log-pre stdout"></pre>
+            </div>
+            <div class="log-section-block">
+                <div class="log-section-header stderr">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <circle cx="12" cy="12" r="10"></circle>
+                        <line x1="12" y1="8" x2="12" y2="12"></line>
+                        <line x1="12" y1="16" x2="12.01" y2="16"></line>
+                    </svg>
+                    STDERR (error_tail)
+                </div>
+                <pre id="logStderr" class="log-pre stderr"></pre>
+            </div>
+            <div class="modal-actions">
+                <button class="btn-cancel" onclick="closeLogModal()">关闭</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Toast 容器 -->
+    <div id="toast" class="toast"></div>
+
+    <script>
+        // ============================================
+        // 全局状态
+        // ============================================
+        let autoRefreshTimer = null;
+        let autoRefreshEnabled = true;
+        let currentTriggerAction = null;
+        let isTriggering = false;
+
+        // SVG 图标常量
+        const ICONS = {
+            sun: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="5"></circle><line x1="12" y1="1" x2="12" y2="3"></line><line x1="12" y1="21" x2="12" y2="23"></line><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"></line><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"></line><line x1="1" y1="12" x2="3" y2="12"></line><line x1="21" y1="12" x2="23" y2="12"></line><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"></line><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"></line></svg>',
+            moon: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"></path></svg>',
+            bolt: '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"></polygon></svg>',
+            server: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="2" width="20" height="8" rx="2" ry="2"></rect><rect x="2" y="14" width="20" height="8" rx="2" ry="2"></rect><line x1="6" y1="6" x2="6.01" y2="6"></line><line x1="6" y1="18" x2="6.01" y2="18"></line></svg>',
+            terminal: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="4 17 10 11 4 5"></polyline><line x1="12" y1="19" x2="20" y2="19"></line></svg>',
+            package: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="16.5" y1="9.4" x2="7.5" y2="4.21"></line><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"></path><polyline points="3.27 6.96 12 12.01 20.73 6.96"></polyline><line x1="12" y1="22.08" x2="12" y2="12"></line></svg>'
+        };
+
+        // ============================================
+        // 主题切换
+        // ============================================
+        function toggleTheme() {
+            const currentTheme = document.documentElement.getAttribute('data-theme');
+            const newTheme = currentTheme === 'dark' ? 'light' : 'dark';
+            document.documentElement.setAttribute('data-theme', newTheme);
+            localStorage.setItem('theme', newTheme);
+            updateThemeButton(newTheme);
+        }
+
+        function updateThemeButton(theme) {
+            const iconWrap = document.getElementById('themeIconWrap');
+            const themeText = document.getElementById('themeText');
+            if (theme === 'dark') {
+                iconWrap.innerHTML = ICONS.sun;
+                themeText.textContent = '浅色模式';
+            } else {
+                iconWrap.innerHTML = ICONS.moon;
+                themeText.textContent = '深色模式';
+            }
+        }
+
+        // ============================================
+        // 工具函数
+        // ============================================
+        function escapeHtml(text) {
+            if (text === null || text === undefined) return '';
+            const div = document.createElement('div');
+            div.textContent = String(text);
+            return div.innerHTML;
+        }
+
+        function showToast(message, type = 'info') {
+            const toast = document.getElementById('toast');
+            toast.className = `toast ${type}`;
+            toast.innerHTML = `${type === 'success' ? '✓' : type === 'error' ? '✕' : 'ℹ'} ${escapeHtml(message)}`;
+            toast.classList.add('show');
+            clearTimeout(toast._timer);
+            toast._timer = setTimeout(() => {
+                toast.classList.remove('show');
+            }, 3500);
+        }
+
+        function formatDuration(seconds) {
+            if (seconds === null || seconds === undefined) return '-';
+            const num = Number(seconds);
+            if (isNaN(num)) return '-';
+            if (num < 60) return num.toFixed(1) + 's';
+            const min = Math.floor(num / 60);
+            const sec = (num % 60).toFixed(0);
+            return `${min}m ${sec}s`;
+        }
+
+        function formatTime(timeStr) {
+            if (!timeStr) return '-';
+            return timeStr;
+        }
+
+        // ============================================
+        // Action 配置加载
+        // ============================================
+        async function fetchActions() {
+            try {
+                const response = await fetch('/api/trigger-actions', {
+                    method: 'GET',
+                    headers: { 'Content-Type': 'application/json' },
+                    credentials: 'same-origin'
+                });
+                if (!response.ok) {
+                    throw new Error(`HTTP ${response.status}`);
+                }
+                const data = await response.json();
+                renderActions(data.actions || []);
+            } catch (error) {
+                console.error('获取 Action 配置失败:', error);
+                renderActionsError(error.message);
+            }
+        }
+
+        function renderActions(actions) {
+            const container = document.getElementById('actionsContainer');
+            const countEl = document.getElementById('actionsCount');
+
+            if (!actions.length) {
+                countEl.textContent = '';
+                container.innerHTML = `
+                    <div class="empty-state" style="grid-column: 1 / -1;">
+                        <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+                            <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
+                            <polyline points="14 2 14 8 20 8"></polyline>
+                        </svg>
+                        <div class="empty-state-title">暂无 Action 配置</div>
+                        <div class="empty-state-desc">请检查 trigger_actions.yaml 文件是否存在</div>
+                    </div>
+                `;
+                return;
+            }
+
+            countEl.textContent = `共 ${actions.length} 个`;
+
+            container.innerHTML = actions.map((action, index) => {
+                const isSsh = !!action.ssh_host;
+                const modeBadge = isSsh
+                    ? `<span class="action-mode-badge mode-ssh">${ICONS.server} SSH 远程</span>`
+                    : `<span class="action-mode-badge mode-local">${ICONS.terminal} 本地执行</span>`;
+
+                // 分支匹配展示
+                let refTagsHtml = '<span style="color: var(--text-tertiary); font-size: 0.75rem;">未配置</span>';
+                const refPatterns = action.ref_patterns || [];
+                const refPattern = action.ref_pattern || '';
+                if (refPatterns.length) {
+                    refTagsHtml = refPatterns.map(r => `<span class="ref-tag">${escapeHtml(r)}</span>`).join('');
+                } else if (refPattern) {
+                    refTagsHtml = `<span class="ref-tag">${escapeHtml(refPattern)}</span>`;
+                }
+
+                // workorder 标识
+                const workorderHtml = action.workorder
+                    ? `<span class="workorder-tag">${ICONS.package} workorder</span>`
+                    : '';
+
+                // 变量键列表
+                const varKeys = action.variables_keys || [];
+                const varKeysHtml = varKeys.length
+                    ? varKeys.map(k => `<span class="var-key">${escapeHtml(k)}</span>`).join('')
+                    : '<span style="color: var(--text-tertiary); font-size: 0.75rem;">无</span>';
+
+                // SSH host 显示
+                const sshHostHtml = isSsh
+                    ? `<div class="action-field">
+                        <span class="action-field-label">SSH Host:</span>
+                        <span class="action-field-value">${escapeHtml(action.ssh_host)}${action.ssh_port && action.ssh_port !== 22 ? ':' + escapeHtml(action.ssh_port) : ''}</span>
+                       </div>`
+                    : '';
+
+                return `
+                    <div class="action-card" style="animation-delay: ${index * 0.05}s;">
+                        <div class="action-card-header">
+                            <div class="action-name">
+                                ${ICONS.bolt}
+                                <span>${escapeHtml(action.name || '未命名')}</span>
+                            </div>
+                            ${modeBadge}
+                        </div>
+                        <div class="action-field">
+                            <span class="action-field-label">项目匹配:</span>
+                            <span class="action-field-value">${escapeHtml(action.project_pattern || '-')}</span>
+                        </div>
+                        <div class="action-field">
+                            <span class="action-field-label">分支匹配:</span>
+                            <div class="ref-tags">${refTagsHtml}</div>
+                        </div>
+                        <div class="action-field">
+                            <span class="action-field-label">脚本:</span>
+                            <span class="action-field-value">${escapeHtml(action.script || '-')}</span>
+                        </div>
+                        ${sshHostHtml}
+                        <div class="action-field">
+                            <span class="action-field-label">变量键:</span>
+                            <div class="var-keys">${varKeysHtml}</div>
+                        </div>
+                        ${workorderHtml ? `<div style="margin-top: var(--space-2);">${workorderHtml}</div>` : ''}
+                        <div class="action-card-footer">
+                            <button class="trigger-btn" onclick="openTriggerModal(${index})" data-action-index="${index}">
+                                ${ICONS.bolt}
+                                触发执行
+                            </button>
+                        </div>
+                    </div>
+                `;
+            }).join('');
+
+            // 缓存 actions 数据到全局，供触发使用
+            window._cachedActions = actions;
+        }
+
+        function renderActionsError(message) {
+            const container = document.getElementById('actionsContainer');
+            document.getElementById('actionsCount').textContent = '';
+            container.innerHTML = `
+                <div class="empty-state" style="grid-column: 1 / -1; color: var(--error-600);">
+                    <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+                        <circle cx="12" cy="12" r="10"></circle>
+                        <line x1="12" y1="8" x2="12" y2="12"></line>
+                        <line x1="12" y1="16" x2="12.01" y2="16"></line>
+                    </svg>
+                    <div class="empty-state-title">获取 Action 配置失败</div>
+                    <div class="empty-state-desc">${escapeHtml(message)}，请刷新重试</div>
+                </div>
+            `;
+        }
+
+        // ============================================
+        // 历史记录加载
+        // ============================================
+        async function fetchHistory() {
+            try {
+                const response = await fetch('/api/trigger-actions/history?limit=50', {
+                    method: 'GET',
+                    headers: { 'Content-Type': 'application/json' },
+                    credentials: 'same-origin'
+                });
+                if (!response.ok) {
+                    throw new Error(`HTTP ${response.status}`);
+                }
+                const data = await response.json();
+                renderHistory(data.history || []);
+            } catch (error) {
+                console.error('获取执行历史失败:', error);
+                renderHistoryError(error.message);
+            }
+        }
+
+        function renderHistory(history) {
+            const tbody = document.getElementById('historyBody');
+            const countEl = document.getElementById('historyCount');
+
+            if (!history.length) {
+                countEl.textContent = '';
+                tbody.innerHTML = `
+                    <tr>
+                        <td colspan="11" class="empty-state">
+                            <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+                                <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
+                                <polyline points="14 2 14 8 20 8"></polyline>
+                            </svg>
+                            <div class="empty-state-title">暂无执行历史</div>
+                            <div class="empty-state-desc">Pipeline 成功或手动触发后，执行记录将显示在此</div>
+                        </td>
+                    </tr>
+                `;
+                return;
+            }
+
+            countEl.textContent = `共 ${history.length} 条`;
+
+            tbody.innerHTML = history.map((record, index) => {
+                const isSuccess = record.success === true;
+                const rowClass = isSuccess ? 'row-success' : 'row-failed';
+                const statusBadge = isSuccess
+                    ? `<span class="status-badge status-success">成功</span>`
+                    : `<span class="status-badge status-failed">失败</span>`;
+                const sourceBadge = record.trigger_source === 'manual'
+                    ? `<span class="source-badge source-manual">手动</span>`
+                    : `<span class="source-badge source-auto">自动</span>`;
+                const iid = record.pipeline_iid || '-';
+                const location = record.ssh_host || 'local';
+
+                return `
+                    <tr class="${rowClass}" style="animation: slideUp 0.3s ease-out ${Math.min(index * 0.03, 0.3)}s backwards;">
+                        <td><strong>${escapeHtml(record.action_name || '-')}</strong></td>
+                        <td>${escapeHtml(record.project_name || '-')}</td>
+                        <td class="mono">${escapeHtml(record.ref || '-')}</td>
+                        <td class="mono">${escapeHtml(iid)}</td>
+                        <td>${statusBadge}</td>
+                        <td class="mono">${formatDuration(record.duration)}</td>
+                        <td class="mono">${escapeHtml(formatTime(record.start_time))}</td>
+                        <td class="mono">${escapeHtml(formatTime(record.end_time))}</td>
+                        <td>${sourceBadge}</td>
+                        <td class="mono">${escapeHtml(location)}</td>
+                        <td>
+                            <button class="view-log-btn" onclick='openLogModal(${JSON.stringify(record).replace(/'/g, "&#39;")})'>
+                                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                    <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
+                                    <polyline points="14 2 14 8 20 8"></polyline>
+                                    <line x1="16" y1="13" x2="8" y2="13"></line>
+                                    <line x1="16" y1="17" x2="8" y2="17"></line>
+                                </svg>
+                                查看日志
+                            </button>
+                        </td>
+                    </tr>
+                `;
+            }).join('');
+        }
+
+        function renderHistoryError(message) {
+            const tbody = document.getElementById('historyBody');
+            document.getElementById('historyCount').textContent = '';
+            tbody.innerHTML = `
+                <tr>
+                    <td colspan="11" class="empty-state" style="color: var(--error-600);">
+                        <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+                            <circle cx="12" cy="12" r="10"></circle>
+                            <line x1="12" y1="8" x2="12" y2="12"></line>
+                            <line x1="12" y1="16" x2="12.01" y2="16"></line>
+                        </svg>
+                        <div class="empty-state-title">获取执行历史失败</div>
+                        <div class="empty-state-desc">${escapeHtml(message)}，请刷新重试</div>
+                    </td>
+                </tr>
+            `;
+        }
+
+        // ============================================
+        // 自动刷新
+        // ============================================
+        function toggleAutoRefresh() {
+            autoRefreshEnabled = !autoRefreshEnabled;
+            const toggle = document.getElementById('autoRefreshToggle');
+            const text = document.getElementById('autoRefreshText');
+            if (autoRefreshEnabled) {
+                toggle.classList.add('active');
+                text.textContent = '自动刷新 (10s)';
+                startAutoRefresh();
+            } else {
+                toggle.classList.remove('active');
+                text.textContent = '已暂停';
+                stopAutoRefresh();
+            }
+        }
+
+        function startAutoRefresh() {
+            stopAutoRefresh();
+            if (autoRefreshEnabled) {
+                autoRefreshTimer = setInterval(() => {
+                    fetchHistory();
+                }, 10000);
+            }
+        }
+
+        function stopAutoRefresh() {
+            if (autoRefreshTimer) {
+                clearInterval(autoRefreshTimer);
+                autoRefreshTimer = null;
+            }
+        }
+
+        // ============================================
+        // 手动触发
+        // ============================================
+        function openTriggerModal(actionIndex) {
+            const actions = window._cachedActions || [];
+            const action = actions[actionIndex];
+            if (!action) {
+                showToast('Action 数据未加载，请刷新后重试', 'error');
+                return;
+            }
+            currentTriggerAction = action;
+            document.getElementById('triggerActionName').textContent = action.name || '';
+            document.getElementById('triggerRef').value = '';
+            document.getElementById('triggerIid').value = '';
+
+            // 预填默认分支（取第一个 ref_pattern）
+            const refPatterns = action.ref_patterns || [];
+            const refPattern = action.ref_pattern || '';
+            if (refPatterns.length) {
+                document.getElementById('triggerRef').value = refPatterns[0];
+            } else if (refPattern) {
+                document.getElementById('triggerRef').value = refPattern;
+            }
+
+            const modal = document.getElementById('triggerModal');
+            modal.classList.add('show');
+            setTimeout(() => document.getElementById('triggerRef').focus(), 100);
+        }
+
+        function closeTriggerModal() {
+            document.getElementById('triggerModal').classList.remove('show');
+            currentTriggerAction = null;
+        }
+
+        async function submitTrigger() {
+            if (isTriggering) return;
+            if (!currentTriggerAction) {
+                showToast('未选择 Action', 'error');
+                return;
+            }
+
+            const ref = document.getElementById('triggerRef').value.trim();
+            const iidRaw = document.getElementById('triggerIid').value.trim();
+
+            // 输入验证
+            if (!ref) {
+                showToast('请填写分支名 (ref)', 'error');
+                document.getElementById('triggerRef').focus();
+                return;
+            }
+
+            let pipelineIid = null;
+            if (iidRaw) {
+                pipelineIid = parseInt(iidRaw, 10);
+                if (isNaN(pipelineIid) || pipelineIid <= 0) {
+                    showToast('Pipeline IID 必须为正整数', 'error');
+                    document.getElementById('triggerIid').focus();
+                    return;
+                }
+            }
+
+            const btn = document.getElementById('confirmTriggerBtn');
+            const originalText = btn.innerHTML;
+            btn.disabled = true;
+            btn.innerHTML = '触发中...';
+            isTriggering = true;
+
+            try {
+                const response = await fetch('/api/trigger-actions/trigger', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    credentials: 'same-origin',
+                    body: JSON.stringify({
+                        action_name: currentTriggerAction.name,
+                        ref: ref,
+                        pipeline_iid: pipelineIid
+                    })
+                });
+                const data = await response.json();
+                if (data.success) {
+                    showToast(data.message || '触发成功', 'success');
+                    closeTriggerModal();
+                    // 稍后刷新历史记录
+                    setTimeout(() => fetchHistory(), 1500);
+                } else {
+                    showToast(data.message || '触发失败', 'error');
+                }
+            } catch (error) {
+                console.error('触发失败:', error);
+                showToast('触发失败: ' + error.message, 'error');
+            } finally {
+                btn.disabled = false;
+                btn.innerHTML = originalText;
+                isTriggering = false;
+            }
+        }
+
+        // ============================================
+        // 日志查看
+        // ============================================
+        function openLogModal(record) {
+            const title = document.getElementById('logModalTitle');
+            const meta = document.getElementById('logModalMeta');
+            const stdout = document.getElementById('logStdout');
+            const stderr = document.getElementById('logStderr');
+
+            title.textContent = `执行日志 - ${record.action_name || '-'}`;
+
+            const statusBadge = record.success
+                ? '<span class="status-badge status-success">成功</span>'
+                : '<span class="status-badge status-failed">失败</span>';
+
+            meta.innerHTML = `
+                <span>项目: <strong style="color: var(--text-color);">${escapeHtml(record.project_name || '-')}</strong></span>
+                <span>分支: <code style="background: var(--gray-100); padding: 1px 6px; border-radius: 4px;">${escapeHtml(record.ref || '-')}</code></span>
+                <span>开始: ${escapeHtml(record.start_time || '-')}</span>
+                <span>耗时: ${escapeHtml(formatDuration(record.duration))}</span>
+                ${statusBadge}
+            `;
+
+            const outTail = (record.output_tail || '').trim();
+            const errTail = (record.error_tail || '').trim();
+
+            stdout.textContent = outTail || '(无 stdout 输出)';
+            stderr.textContent = errTail || '(无 stderr 输出)';
+
+            if (!outTail) stdout.classList.add('log-empty');
+            else stdout.classList.remove('log-empty');
+
+            if (!errTail) stderr.classList.add('log-empty');
+            else stderr.classList.remove('log-empty');
+
+            document.getElementById('logModal').classList.add('show');
+        }
+
+        function closeLogModal() {
+            document.getElementById('logModal').classList.remove('show');
+        }
+
+        // ============================================
+        // 刷新全部
+        // ============================================
+        function refreshAll() {
+            const icon = document.getElementById('refreshIcon');
+            icon.style.animation = 'spin 1s linear infinite';
+            Promise.all([fetchActions(), fetchHistory()]).finally(() => {
+                setTimeout(() => {
+                    icon.style.animation = '';
+                }, 500);
+            });
+        }
+
+        // ============================================
+        // 事件绑定 & 初始化
+        // ============================================
+        document.addEventListener('DOMContentLoaded', function() {
+            // 初始化主题
+            const savedTheme = localStorage.getItem('theme') || 'light';
+            document.documentElement.setAttribute('data-theme', savedTheme);
+            updateThemeButton(savedTheme);
+
+            // 加载数据
+            fetchActions();
+            fetchHistory();
+
+            // 启动自动刷新
+            startAutoRefresh();
+
+            // 模态框点击外部关闭
+            window.onclick = function(event) {
+                const triggerModal = document.getElementById('triggerModal');
+                const logModal = document.getElementById('logModal');
+                if (event.target === triggerModal) closeTriggerModal();
+                if (event.target === logModal) closeLogModal();
+            };
+
+            // ESC 关闭模态框
+            document.addEventListener('keydown', function(event) {
+                if (event.key === 'Escape') {
+                    closeTriggerModal();
+                    closeLogModal();
+                }
+            });
+
+            // 回车键提交触发
+            document.getElementById('triggerIid').addEventListener('keydown', function(event) {
+                if (event.key === 'Enter') {
+                    event.preventDefault();
+                    submitTrigger();
+                }
+            });
+            document.getElementById('triggerRef').addEventListener('keydown', function(event) {
+                if (event.key === 'Enter') {
+                    event.preventDefault();
+                    submitTrigger();
+                }
+            });
+        });
+    </script>
+</body>
+</html>

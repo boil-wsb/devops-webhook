@@ -692,3 +692,35 @@ def register_routes(app):
                 'message': '日志文件不存在'
             }), 404
 
+    # === Trigger Actions 可视化页面 ===
+    @app.route('/trigger-actions')
+    def trigger_actions_view():
+        """Trigger Actions 可视化页面"""
+        return render_template('trigger_actions.html')
+
+    @app.route('/api/trigger-actions', methods=['GET'])
+    def trigger_actions_config_api():
+        """获取 trigger_actions 配置"""
+        from src.services.trigger_action import get_trigger_actions_config
+        return jsonify({'actions': get_trigger_actions_config()})
+
+    @app.route('/api/trigger-actions/history', methods=['GET'])
+    def trigger_actions_history_api():
+        """获取执行历史记录"""
+        from src.services.trigger_action import get_trigger_history
+        limit = request.args.get('limit', 50, type=int)
+        return jsonify({'history': get_trigger_history(limit)})
+
+    @app.route('/api/trigger-actions/trigger', methods=['POST'])
+    def trigger_actions_manual_trigger_api():
+        """手动触发 action"""
+        from src.services.trigger_action import manual_trigger
+        data = request.get_json(force=True)
+        action_name = data.get('action_name', '')
+        ref = data.get('ref', '')
+        pipeline_iid = data.get('pipeline_iid')
+        if not action_name:
+            return jsonify({'success': False, 'message': '缺少 action_name'}), 400
+        result = manual_trigger(action_name, ref=ref, pipeline_iid=pipeline_iid)
+        return jsonify(result)
+

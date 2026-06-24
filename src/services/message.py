@@ -157,9 +157,26 @@ def send_notification(route_name, message, chat_id=None, message_id=None, callba
                     "message_id": message_id
                 }
             else:
-                app_logger.warning(f"message | api_update_fallback | route={route_name}, reason=api_failed, fallback=webhook")
+                app_logger.warning(f"message | api_update_fallback | route={route_name}, reason=api_failed, fallback=api_send")
         except Exception as e:
-            app_logger.warning(f"message | api_update_fallback | route={route_name}, error={e}, fallback=webhook")
+            app_logger.warning(f"message | api_update_fallback | route={route_name}, error={e}, fallback=api_send")
+
+        # API 更新失败，回退到 API 发送新卡片
+        try:
+            from src.services.feishu_notify import send_card_via_api, store_sent_card
+            store_sent_card(callback_id, card_content, chat_id=chat_id)
+            result = send_card_via_api(card_content, chat_id=chat_id, callback_id=callback_id)
+            if result and result.get('success'):
+                app_logger.info(f"message | api_send_fallback_success | route={route_name}")
+                return {
+                    "success": True,
+                    "method": "api",
+                    "message_id": result.get('message_id')
+                }
+            else:
+                app_logger.warning(f"message | api_send_fallback | route={route_name}, reason=api_failed, fallback=webhook")
+        except Exception as e:
+            app_logger.warning(f"message | api_send_fallback | route={route_name}, error={e}, fallback=webhook")
     else:
         try:
             from src.services.feishu_notify import send_card_via_api, store_sent_card
