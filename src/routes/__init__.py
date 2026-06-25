@@ -706,10 +706,59 @@ def register_routes(app):
 
     @app.route('/api/trigger-actions/history', methods=['GET'])
     def trigger_actions_history_api():
-        """获取执行历史记录"""
+        """获取执行历史记录（支持分页和筛选）
+        
+        Query 参数:
+            limit: 每页条数，默认 50
+            offset: 偏移量，默认 0
+            page: 页码（从1开始，可选，如果提供则覆盖 offset）
+            action_name: 按 action 名称筛选（可选）
+            project_name: 按项目名称筛选（可选）
+            success: 按执行结果筛选，true/false（可选）
+        """
         from src.services.trigger_action import get_trigger_history
+        
+        # 获取分页参数
         limit = request.args.get('limit', 50, type=int)
-        return jsonify({'history': get_trigger_history(limit)})
+        page = request.args.get('page', None, type=int)
+        action_name = request.args.get('action_name', None)
+        project_name = request.args.get('project_name', None)
+        success_str = request.args.get('success', None)
+        
+        # 处理 success 参数
+        success = None
+        if success_str is not None:
+            success = success_str.lower() in ('true', '1', 'yes')
+        
+        # 处理 offset（如果有 page 参数则计算）
+        if page and page > 0:
+            offset = (page - 1) * limit
+        else:
+            offset = request.args.get('offset', 0, type=int)
+        
+        # 限制 limit 范围
+        limit = max(1, min(limit, 200))
+        
+        result = get_trigger_history(
+            limit=limit,
+            offset=offset,
+            action_name=action_name,
+            project_name=project_name,
+            success=success
+        )
+        
+        return jsonify({
+            'status': 'success',
+            'data': result['records'],
+            'pagination': {
+                'total': result['pagination']['total'],
+                'limit': result['pagination']['limit'],
+                'offset': result['pagination']['offset'],
+                'page': (result['pagination']['offset'] // result['pagination']['limit']) + 1 if result['pagination']['limit'] > 0 else 1,
+                'total_pages': (result['pagination']['total'] + result['pagination']['limit'] - 1) // result['pagination']['limit'] if result['pagination']['limit'] > 0 else 0,
+                'has_more': result['pagination']['has_more']
+            }
+        })
 
     @app.route('/api/trigger-actions/trigger', methods=['POST'])
     def trigger_actions_manual_trigger_api():

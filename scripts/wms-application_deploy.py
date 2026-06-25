@@ -8,7 +8,7 @@ import requests
 
 # 添加脚本目录到路径，导入公共工具
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from deploy_utils import ensure_dependencies, run_cmd, get_minio_client, upload_to_minio
+from deploy_utils import ensure_dependencies, run_cmd, get_minio_client, upload_to_minio, get_workorder_images_dir, get_workorder_deploy_dir, update_compose_image
 
 
 def search_docker_image(nexus_url, nexus_user, nexus_password, branch, iid=None):
@@ -111,11 +111,18 @@ def main():
     run_cmd(['docker', 'login', docker_registry_url, '-u', nexus_user, '-p', nexus_password])
     run_cmd(['docker', 'pull', image_full])
 
-    image_tar = f"{project_name}_{ref}.tar"
+    # 保存镜像到 workorder/deploy/images 目录（文件名包含 IID）
+    images_dir = get_workorder_images_dir()
+    iid_suffix = f"_{iid}" if iid is not None else ""
+    image_tar = os.path.join(images_dir, f"{project_name}_{ref}{iid_suffix}.tar")
     run_cmd(['docker', 'save', '-o', image_tar, image_full])
     print(f"镜像已保存: {image_tar}")
 
-    # 3. 使用 Python MinIO SDK 上传
+    # 3. 更新 workorder/deploy/docker-compose.yml 中对应服务的镜像名
+    compose_path = os.path.join(get_workorder_deploy_dir(), 'docker-compose.yml')
+    update_compose_image(compose_path, image['name'], image_full)
+
+    # 4. 使用 Python MinIO SDK 上传
     if minio_endpoint and minio_access_key and minio_secret_key:
         minio_client = get_minio_client(minio_endpoint, minio_access_key, minio_secret_key)
         # TODO: 根据实际需求组装安装包并上传
@@ -124,9 +131,7 @@ def main():
     else:
         print("提示: 未配置完整的 MinIO 信息，跳过上传")
 
-    # 4. 清理
-    if os.path.exists(image_tar):
-        os.remove(image_tar)
+    # 5. 镜像 tar 已保留在 workorder/deploy/images，不再清理
     print("部署完成")
 
 

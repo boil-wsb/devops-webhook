@@ -573,6 +573,83 @@
             color: var(--primary-300);
         }
 
+        /* 分页控件 */
+        .pagination-wrapper {
+            display: flex;
+            justify-content: center;
+            margin-top: var(--space-4);
+            padding-top: var(--space-4);
+            border-top: 1px solid var(--border-color);
+        }
+
+        .pagination-controls {
+            display: flex;
+            align-items: center;
+            gap: var(--space-1);
+        }
+
+        .page-btn {
+            min-width: 36px;
+            height: 36px;
+            padding: 0 var(--space-3);
+            border: 1px solid var(--border-color);
+            background: var(--bg-secondary);
+            color: var(--text-color);
+            border-radius: var(--radius-md);
+            font-size: 0.875rem;
+            cursor: pointer;
+            transition: all 0.15s ease;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .page-btn:hover:not(:disabled) {
+            border-color: var(--primary-300);
+            background: var(--primary-50);
+            color: var(--primary-700);
+        }
+
+        .page-btn:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+
+        .page-btn.page-active {
+            background: var(--primary-500);
+            border-color: var(--primary-500);
+            color: white;
+            font-weight: 600;
+        }
+
+        .page-btn.page-active:hover {
+            background: var(--primary-600);
+            border-color: var(--primary-600);
+            color: white;
+        }
+
+        .page-ellipsis {
+            padding: 0 var(--space-2);
+            color: var(--text-tertiary);
+            user-select: none;
+        }
+
+        [data-theme="dark"] .page-btn:hover:not(:disabled) {
+            background: var(--primary-900);
+            border-color: var(--primary-700);
+            color: var(--primary-300);
+        }
+
+        [data-theme="dark"] .page-btn.page-active {
+            background: var(--primary-600);
+            border-color: var(--primary-600);
+        }
+
+        [data-theme="dark"] .page-btn.page-active:hover {
+            background: var(--primary-500);
+            border-color: var(--primary-500);
+        }
+
         /* 手动触发模态框 */
         .trigger-modal-content {
             max-width: 480px;
@@ -1067,6 +1144,7 @@
                     </tbody>
                 </table>
             </div>
+            <div id="historyPagination" class="pagination-wrapper"></div>
         </section>
     </div>
 
@@ -1354,11 +1432,16 @@
         }
 
         // ============================================
-        // 历史记录加载
+        // 历史记录加载（支持分页）
         // ============================================
-        async function fetchHistory() {
+        let currentPage = 1;
+        const pageSize = 20;
+        
+        async function fetchHistory(page = 1) {
             try {
-                const response = await fetch('/api/trigger-actions/history?limit=50', {
+                currentPage = page;
+                const offset = (page - 1) * pageSize;
+                const response = await fetch(`/api/trigger-actions/history?limit=${pageSize}&offset=${offset}`, {
                     method: 'GET',
                     headers: { 'Content-Type': 'application/json' },
                     credentials: 'same-origin'
@@ -1367,19 +1450,29 @@
                     throw new Error(`HTTP ${response.status}`);
                 }
                 const data = await response.json();
-                renderHistory(data.history || []);
+                // 兼容新旧格式：新格式用 data.data，旧格式用 data.history
+                const records = data.data || data.history || [];
+                const pagination = data.pagination || { total: records.length, page: 1, total_pages: 1, has_more: false };
+                renderHistory(records, pagination);
             } catch (error) {
                 console.error('获取执行历史失败:', error);
                 renderHistoryError(error.message);
             }
         }
+        
+        function goToPage(page) {
+            if (page >= 1) {
+                fetchHistory(page);
+            }
+        }
 
-        function renderHistory(history) {
+        function renderHistory(history, pagination = null) {
             const tbody = document.getElementById('historyBody');
             const countEl = document.getElementById('historyCount');
+            const paginationEl = document.getElementById('historyPagination');
 
             if (!history.length) {
-                countEl.textContent = '';
+                countEl.textContent = pagination ? `共 ${pagination.total} 条` : '';
                 tbody.innerHTML = `
                     <tr>
                         <td colspan="11" class="empty-state">
@@ -1392,10 +1485,16 @@
                         </td>
                     </tr>
                 `;
+                if (paginationEl) paginationEl.innerHTML = '';
                 return;
             }
 
-            countEl.textContent = `共 ${history.length} 条`;
+            // 更新计数显示
+            if (pagination) {
+                countEl.textContent = `共 ${pagination.total} 条，第 ${pagination.page}/${pagination.total_pages || 1} 页`;
+            } else {
+                countEl.textContent = `共 ${history.length} 条`;
+            }
 
             tbody.innerHTML = history.map((record, index) => {
                 const isSuccess = record.success === true;
@@ -1435,11 +1534,46 @@
                     </tr>
                 `;
             }).join('');
+            
+            // 渲染分页控件
+            if (paginationEl && pagination && pagination.total_pages > 1) {
+                const totalPages = pagination.total_pages;
+                const current = pagination.page;
+                let paginationHtml = '<div class="pagination-controls">';
+                
+                // 上一页
+                paginationHtml += `<button class="page-btn" onclick="goToPage(${current - 1})" ${current <= 1 ? 'disabled' : ''}>上一页</button>`;
+                
+                // 页码按钮（最多显示7个页码）
+                let startPage = Math.max(1, current - 3);
+                let endPage = Math.min(totalPages, current + 3);
+                if (startPage > 1) {
+                    paginationHtml += `<button class="page-btn" onclick="goToPage(1)">1</button>`;
+                    if (startPage > 2) paginationHtml += '<span class="page-ellipsis">...</span>';
+                }
+                for (let p = startPage; p <= endPage; p++) {
+                    paginationHtml += `<button class="page-btn ${p === current ? 'page-active' : ''}" onclick="goToPage(${p})">${p}</button>`;
+                }
+                if (endPage < totalPages) {
+                    if (endPage < totalPages - 1) paginationHtml += '<span class="page-ellipsis">...</span>';
+                    paginationHtml += `<button class="page-btn" onclick="goToPage(${totalPages})">${totalPages}</button>`;
+                }
+                
+                // 下一页
+                paginationHtml += `<button class="page-btn" onclick="goToPage(${current + 1})" ${current >= totalPages ? 'disabled' : ''}>下一页</button>`;
+                paginationHtml += '</div>';
+                
+                paginationEl.innerHTML = paginationHtml;
+            } else if (paginationEl) {
+                paginationEl.innerHTML = '';
+            }
         }
 
         function renderHistoryError(message) {
             const tbody = document.getElementById('historyBody');
+            const paginationEl = document.getElementById('historyPagination');
             document.getElementById('historyCount').textContent = '';
+            if (paginationEl) paginationEl.innerHTML = '';
             tbody.innerHTML = `
                 <tr>
                     <td colspan="11" class="empty-state" style="color: var(--error-600);">

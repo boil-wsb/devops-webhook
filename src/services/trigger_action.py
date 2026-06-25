@@ -15,10 +15,10 @@ WORKORDER_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', '
 _trigger_actions_cache = {'actions': None, 'mtime': 0}
 _trigger_actions_lock = threading.Lock()
 
-# 执行历史记录（内存存储，最多保留 200 条）
-_trigger_history = []
+# 内存缓存（最近 200 条，用于快速访问；持久化到数据库）
+_trigger_history_cache = []
 _trigger_history_lock = threading.Lock()
-_TRIGGER_HISTORY_MAX = 200
+_TRIGGER_HISTORY_CACHE_MAX = 200
 
 
 def _strip_ref_prefix(ref):
@@ -313,7 +313,7 @@ def _execute_ssh(action, path_with_namespace, ref, project_name, pipeline_iid=No
 
 
 def _notify_result(action_name, project_name, ref, success, output='', error_output='', exit_code=None, ssh_host='', variables=None, trigger_source='auto', pipeline_iid=None, start_time=None):
-    # 记录执行历史
+    # 记录执行历史（持久化到数据库 + 内存缓存）
     _record_history(action_name, project_name, ref, success, output, error_output, exit_code, ssh_host, trigger_source, pipeline_iid, start_time)
     try:
         from src.services.feishu_notify import send_action_result
@@ -323,14 +323,24 @@ def _notify_result(action_name, project_name, ref, success, output='', error_out
 
 
 def _record_history(action_name, project_name, ref, success, output, error_output, exit_code, ssh_host, trigger_source, pipeline_iid, start_time):
-    """记录执行历史到内存列表"""
+    """记录执行历史到数据库和内存缓存"""
     end_time = datetime.now()
     duration = (end_time - start_time).total_seconds() if start_time else 0
+    
+    # 处理 pipeline_iid 类型
+    if pipeline_iid is not None:
+        try:
+            pipeline_iid_int = int(pipeline_iid)
+        except (ValueError, TypeError):
+            pipeline_iid_int = None
+    else:
+        pipeline_iid_int = None
+    
     record = {
         'action_name': action_name,
         'project_name': project_name,
         'ref': ref,
-        'pipeline_iid': pipeline_iid,
+        'pipeline_iid': pipeline_iid_int,
         'success': success,
         'exit_code': exit_code,
         'start_time': start_time.strftime('%Y-%m-%d %H:%M:%S') if start_time else '',
@@ -341,10 +351,37 @@ def _record_history(action_name, project_name, ref, success, output, error_outpu
         'ssh_host': ssh_host or 'local',
         'trigger_source': trigger_source,
     }
+    
+    # 写入内存缓存
     with _trigger_history_lock:
-        _trigger_history.insert(0, record)
-        if len(_trigger_history) > _TRIGGER_HISTORY_MAX:
-            _trigger_history.pop()
+        _trigger_history_cache.insert(0, record)
+        if len(_trigger_history_cache) > _TRIGGER_HISTORY_CACHE_MAX:
+            _trigger_history_cache.pop()
+    
+    # 异步写入数据库（不阻塞通知流程）
+    def _db_write():
+        try:
+            from src.services.database import TriggerActionHistoryDB
+            TriggerActionHistoryDB.insert(
+                action_name=action_name,
+                project_name=project_name,
+                ref=ref,
+                pipeline_iid=pipeline_iid_int,
+                success=success,
+                exit_code=exit_code,
+                start_time=start_time,
+                end_time=end_time,
+                duration=round(duration, 1),
+                output_tail=record['output_tail'],
+                error_tail=record['error_tail'],
+                ssh_host=ssh_host or 'local',
+                trigger_source=trigger_source,
+            )
+        except Exception as e:
+            logger.error(f"trigger_action | db_record_failed | error={e}")
+    
+    db_thread = threading.Thread(target=_db_write, daemon=True)
+    db_thread.start()
 
 
 def get_trigger_actions_config():
@@ -366,10 +403,57 @@ def get_trigger_actions_config():
     return result
 
 
-def get_trigger_history(limit=50):
-    """获取执行历史记录"""
-    with _trigger_history_lock:
-        return _trigger_history[:limit]
+def get_trigger_history(limit=50, offset=0, action_name=None, project_name=None, success=None):
+    """获取执行历史记录（优先从数据库读取，支持分页和筛选）
+    
+    Args:
+        limit: 每页条数，默认 50
+        offset: 偏移量，默认 0
+        action_name: 按 action 名称筛选（可选）
+        project_name: 按项目名称筛选（可选）
+        success: 按执行结果筛选（可选）
+    
+    Returns:
+        dict: 包含 records、pagination 等信息的字典
+    """
+    try:
+        from src.services.database import TriggerActionHistoryDB
+        records, total = TriggerActionHistoryDB.get_list(
+            limit=limit,
+            offset=offset,
+            action_name=action_name,
+            project_name=project_name,
+            success=success
+        )
+        
+        # 如果数据库没有数据（首次运行），返回内存缓存
+        if total == 0:
+            with _trigger_history_lock:
+                records = _trigger_history_cache[:limit]
+                total = len(_trigger_history_cache)
+        
+        return {
+            'records': records,
+            'pagination': {
+                'total': total,
+                'limit': limit,
+                'offset': offset,
+                'has_more': offset + limit < total
+            }
+        }
+    except Exception as e:
+        logger.error(f"trigger_action | get_history_failed | error={e}")
+        # 数据库查询失败时降级到内存缓存
+        with _trigger_history_lock:
+            return {
+                'records': _trigger_history_cache[:limit],
+                'pagination': {
+                    'total': len(_trigger_history_cache),
+                    'limit': limit,
+                    'offset': offset,
+                    'has_more': False
+                }
+            }
 
 
 def manual_trigger(action_name, ref='', pipeline_iid=None):

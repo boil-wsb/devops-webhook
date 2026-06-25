@@ -149,6 +149,37 @@ def init_database():
                 )
             ''')
 
+            # Trigger Action 执行历史表
+            cursor.execute('''
+                CREATE TABLE IF NOT EXISTS trigger_action_history (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    action_name TEXT NOT NULL,
+                    project_name TEXT NOT NULL,
+                    ref TEXT NOT NULL,
+                    pipeline_iid INTEGER,
+                    success INTEGER NOT NULL DEFAULT 0,
+                    exit_code INTEGER,
+                    start_time TEXT,
+                    end_time TEXT,
+                    duration REAL,
+                    output_tail TEXT,
+                    error_tail TEXT,
+                    ssh_host TEXT DEFAULT 'local',
+                    trigger_source TEXT DEFAULT 'auto',
+                    created_at TEXT DEFAULT (datetime('now', '+8 hours'))
+                )
+            ''')
+
+            cursor.execute('''
+                CREATE INDEX IF NOT EXISTS idx_trigger_history_action_time
+                ON trigger_action_history(action_name, created_at DESC)
+            ''')
+
+            cursor.execute('''
+                CREATE INDEX IF NOT EXISTS idx_trigger_history_project_time
+                ON trigger_action_history(project_name, created_at DESC)
+            ''')
+
             try:
                 cursor.execute('''
                     ALTER TABLE pipeline_records ADD COLUMN updated_at TEXT
@@ -194,8 +225,15 @@ def cleanup_old_records():
 
             deleted_pipeline = cursor.rowcount
 
-        app_logger.info(f"database | cleanup | deleted_push={deleted_push}, deleted_pipeline={deleted_pipeline}")
-        return deleted_push, deleted_pipeline
+            cursor.execute('''
+                DELETE FROM trigger_action_history
+                WHERE created_at < datetime('now', '-{days} days', '+8 hours')
+            '''.format(days=retention_days))
+
+            deleted_trigger = cursor.rowcount
+
+        app_logger.info(f"database | cleanup | deleted_push={deleted_push}, deleted_pipeline={deleted_pipeline}, deleted_trigger={deleted_trigger}")
+        return deleted_push, deleted_pipeline, deleted_trigger
     except Exception as e:
         app_logger.error(f"database | cleanup_failed | error={e}")
         return 0, 0
@@ -543,3 +581,111 @@ class MigrationHistoryDB:
         except Exception as e:
             app_logger.error(f"database | get_migration_history_failed | error={e}")
             return []
+
+
+class TriggerActionHistoryDB:
+    """Trigger Action 执行历史数据库操作类"""
+
+    @staticmethod
+    def insert(action_name, project_name, ref, pipeline_iid, success, exit_code,
+               start_time, end_time, duration, output_tail, error_tail,
+               ssh_host='local', trigger_source='auto'):
+        """插入执行历史记录"""
+        try:
+            # 格式化时间为字符串
+            start_str = start_time.strftime('%Y-%m-%d %H:%M:%S') if start_time else None
+            end_str = end_time.strftime('%Y-%m-%d %H:%M:%S') if end_time else None
+            
+            with get_db_cursor() as cursor:
+                cursor.execute('''
+                    INSERT INTO trigger_action_history
+                    (action_name, project_name, ref, pipeline_iid, success, exit_code,
+                     start_time, end_time, duration, output_tail, error_tail,
+                     ssh_host, trigger_source)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ''', (action_name, project_name, ref, pipeline_iid,
+                      1 if success else 0, exit_code,
+                      start_str, end_str, duration,
+                      output_tail, error_tail, ssh_host, trigger_source))
+                return cursor.lastrowid
+        except Exception as e:
+            app_logger.error(f"database | insert_trigger_history_failed | error={e}")
+            return None
+
+    @staticmethod
+    def get_list(limit=50, offset=0, action_name=None, project_name=None, success=None):
+        """获取执行历史列表（支持分页和筛选）
+        
+        Args:
+            limit: 每页条数
+            offset: 偏移量
+            action_name: 按 action 名称筛选
+            project_name: 按项目名称筛选
+            success: 按执行结果筛选 (True/False)
+        
+        Returns:
+            tuple: (records_list, total_count)
+        """
+        try:
+            conditions = []
+            params = []
+            
+            if action_name:
+                conditions.append("action_name = ?")
+                params.append(action_name)
+            if project_name:
+                conditions.append("project_name LIKE ?")
+                params.append(f"%{project_name}%")
+            if success is not None:
+                conditions.append("success = ?")
+                params.append(1 if success else 0)
+            
+            where_clause = " WHERE " + " AND ".join(conditions) if conditions else ""
+            
+            with get_db_cursor() as cursor:
+                # 查询总数
+                count_sql = f'SELECT COUNT(*) as count FROM trigger_action_history{where_clause}'
+                cursor.execute(count_sql, params)
+                total = cursor.fetchone()['count']
+                
+                # 查询分页数据
+                data_sql = f'''
+                    SELECT * FROM trigger_action_history
+                    {where_clause}
+                    ORDER BY created_at DESC, id DESC
+                    LIMIT ? OFFSET ?
+                '''
+                cursor.execute(data_sql, params + [limit, offset])
+                rows = cursor.fetchall()
+                
+                records = []
+                for row in rows:
+                    record = dict(row)
+                    # 将 success 整数转回布尔值
+                    record['success'] = bool(record['success'])
+                    # 确保 pipeline_iid 是整数或 None
+                    if record['pipeline_iid'] is not None:
+                        record['pipeline_iid'] = int(record['pipeline_iid'])
+                    records.append(record)
+                
+                return records, total
+        except Exception as e:
+            app_logger.error(f"database | get_trigger_history_failed | error={e}")
+            return [], 0
+
+    @staticmethod
+    def get_latest(limit=50):
+        """获取最近的执行历史（兼容旧接口）"""
+        records, _ = TriggerActionHistoryDB.get_list(limit=limit, offset=0)
+        return records
+
+    @staticmethod
+    def count():
+        """获取执行历史总数"""
+        try:
+            with get_db_cursor() as cursor:
+                cursor.execute('SELECT COUNT(*) as count FROM trigger_action_history')
+                return cursor.fetchone()['count']
+        except Exception as e:
+            app_logger.error(f"database | get_trigger_history_count_failed | error={e}")
+            return 0

@@ -9,10 +9,10 @@ from minio.error import S3Error
 
 def check_dependencies(required_commands):
     """检查所需命令是否存在于系统 PATH 中
-    
+
     Args:
         required_commands: 需要检查的命令列表，如 ['docker']
-    
+
     Returns:
         list: 缺失的命令列表
     """
@@ -21,6 +21,73 @@ def check_dependencies(required_commands):
         if shutil.which(cmd) is None:
             missing.append(cmd)
     return missing
+
+
+def get_workorder_images_dir():
+    """获取 workorder/deploy/images 目录路径（用于保存 docker 镜像 tar 文件）
+
+    目录相对于项目根目录（scripts/ 的上级），不存在时自动创建。
+
+    Returns:
+        str: images 目录的绝对路径
+    """
+    scripts_dir = os.path.dirname(os.path.abspath(__file__))
+    project_root = os.path.dirname(scripts_dir)
+    images_dir = os.path.join(project_root, 'workorder', 'deploy', 'images')
+    os.makedirs(images_dir, exist_ok=True)
+    return images_dir
+
+
+def get_workorder_deploy_dir():
+    """获取 workorder/deploy 目录路径
+
+    Returns:
+        str: deploy 目录的绝对路径
+    """
+    scripts_dir = os.path.dirname(os.path.abspath(__file__))
+    project_root = os.path.dirname(scripts_dir)
+    return os.path.join(project_root, 'workorder', 'deploy')
+
+
+def update_compose_image(compose_path, image_name, new_image_full):
+    """更新 docker-compose.yml 中匹配 image_name 的服务镜像
+
+    逐行扫描，找到 image: 行且包含 image_name 的行，替换为新镜像。
+    保留原文件缩进和注释，仅替换匹配行。
+
+    Args:
+        compose_path: docker-compose.yml 文件路径
+        image_name: 镜像名称（如 wms-bulk），用于匹配服务
+        new_image_full: 新的完整镜像地址（如 192.168.100.213:8083/wms-bulk:xxx）
+
+    Returns:
+        bool: 是否成功更新
+    """
+    if not os.path.exists(compose_path):
+        print(f"ERROR: docker-compose 文件不存在: {compose_path}", file=sys.stderr)
+        return False
+
+    with open(compose_path, 'r', encoding='utf-8') as f:
+        lines = f.readlines()
+
+    updated = False
+    for i, line in enumerate(lines):
+        stripped = line.strip()
+        if stripped.startswith('image:') and image_name in stripped:
+            indent = line[:len(line) - len(line.lstrip())]
+            old_image = stripped.split('image:', 1)[1].strip()
+            lines[i] = f"{indent}image: {new_image_full}\n"
+            updated = True
+            print(f"  更新服务镜像: {old_image} -> {new_image_full}")
+            break
+
+    if updated:
+        with open(compose_path, 'w', encoding='utf-8') as f:
+            f.writelines(lines)
+    else:
+        print(f"  提示: 未在 docker-compose.yml 中找到镜像名包含 '{image_name}' 的服务")
+
+    return updated
 
 
 def ensure_dependencies(required_commands):
