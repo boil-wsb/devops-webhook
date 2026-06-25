@@ -23,6 +23,34 @@ def check_dependencies(required_commands):
     return missing
 
 
+def _get_project_root():
+    """获取项目根目录（scripts/ 的上级目录）"""
+    scripts_dir = os.path.dirname(os.path.abspath(__file__))
+    return os.path.dirname(scripts_dir)
+
+
+def ensure_workorder_dirs():
+    """确保 workorder 目录树存在，不存在则创建
+
+    创建以下目录:
+      - workorder/
+      - workorder/deploy/
+      - workorder/deploy/images/
+
+    Returns:
+        str: workorder/deploy 目录的绝对路径
+    """
+    project_root = _get_project_root()
+    workorder_dir = os.path.join(project_root, 'workorder')
+    deploy_dir = os.path.join(workorder_dir, 'deploy')
+    images_dir = os.path.join(deploy_dir, 'images')
+    for d in (workorder_dir, deploy_dir, images_dir):
+        if not os.path.isdir(d):
+            os.makedirs(d, exist_ok=True)
+            print(f"  创建目录: {d}")
+    return deploy_dir
+
+
 def get_workorder_images_dir():
     """获取 workorder/deploy/images 目录路径（用于保存 docker 镜像 tar 文件）
 
@@ -31,21 +59,21 @@ def get_workorder_images_dir():
     Returns:
         str: images 目录的绝对路径
     """
-    scripts_dir = os.path.dirname(os.path.abspath(__file__))
-    project_root = os.path.dirname(scripts_dir)
-    images_dir = os.path.join(project_root, 'workorder', 'deploy', 'images')
-    os.makedirs(images_dir, exist_ok=True)
-    return images_dir
+    ensure_workorder_dirs()
+    project_root = _get_project_root()
+    return os.path.join(project_root, 'workorder', 'deploy', 'images')
 
 
 def get_workorder_deploy_dir():
     """获取 workorder/deploy 目录路径
 
+    目录不存在时自动创建。
+
     Returns:
         str: deploy 目录的绝对路径
     """
-    scripts_dir = os.path.dirname(os.path.abspath(__file__))
-    project_root = os.path.dirname(scripts_dir)
+    ensure_workorder_dirs()
+    project_root = _get_project_root()
     return os.path.join(project_root, 'workorder', 'deploy')
 
 
@@ -64,7 +92,7 @@ def update_compose_image(compose_path, image_name, new_image_full):
         bool: 是否成功更新
     """
     if not os.path.exists(compose_path):
-        print(f"ERROR: docker-compose 文件不存在: {compose_path}", file=sys.stderr)
+        print(f"  提示: docker-compose.yml 不存在（workorder 尚未下载），跳过更新: {compose_path}")
         return False
 
     with open(compose_path, 'r', encoding='utf-8') as f:

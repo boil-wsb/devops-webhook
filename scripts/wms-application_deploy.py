@@ -8,7 +8,7 @@ import requests
 
 # 添加脚本目录到路径，导入公共工具
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from deploy_utils import ensure_dependencies, run_cmd, get_minio_client, upload_to_minio, get_workorder_images_dir, get_workorder_deploy_dir, update_compose_image
+from deploy_utils import ensure_dependencies, run_cmd, get_minio_client, upload_to_minio, get_workorder_images_dir, get_workorder_deploy_dir, update_compose_image, ensure_workorder_dirs
 
 
 def search_docker_image(nexus_url, nexus_user, nexus_password, branch, iid=None):
@@ -77,6 +77,9 @@ def search_docker_image(nexus_url, nexus_user, nexus_password, branch, iid=None)
 
 
 def main():
+    # 确保 workorder 目录存在
+    ensure_workorder_dirs()
+
     # 检查依赖（只需要 docker，mc 已改用 Python 实现）
     ensure_dependencies(['docker'])
 
