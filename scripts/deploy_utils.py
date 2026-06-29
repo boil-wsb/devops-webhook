@@ -1,8 +1,14 @@
 """部署脚本通用工具函数"""
 import os
+import re
+import json
 import shutil
+import hashlib
+import zipfile
 import sys
 import subprocess
+import threading
+from datetime import datetime
 from minio import Minio
 from minio.error import S3Error
 
@@ -269,3 +275,535 @@ def upload_dir_to_minio(client, bucket_name, local_dir, prefix='', make_bucket=F
     except S3Error as e:
         print(f"ERROR: MinIO 目录上传失败: {e}", file=sys.stderr)
         sys.exit(1)
+
+
+# ========== Projectcode 编排相关 ==========
+
+# projectcode 状态文件锁（防止并发写入冲突）
+_projectcode_lock = threading.Lock()
+
+# 跨平台文件锁（用于首次打包并发保护）
+_pack_lock = threading.Lock()
+
+
+def _get_projectcode_status_dir():
+    """获取 projectcode 状态文件目录"""
+    scripts_dir = os.path.dirname(os.path.abspath(__file__))
+    project_root = os.path.dirname(scripts_dir)
+    status_dir = os.path.join(project_root, 'workorder', '.projectcode_status')
+    os.makedirs(status_dir, exist_ok=True)
+    return status_dir
+
+
+def _get_local_status_path(projectcode):
+    """获取 projectcode 本地状态文件路径"""
+    return os.path.join(_get_projectcode_status_dir(), f"{projectcode}.json")
+
+
+def _calc_md5(filepath):
+    """计算文件 MD5"""
+    md5 = hashlib.md5()
+    with open(filepath, 'rb') as f:
+        while True:
+            chunk = f.read(8 * 1024 * 1024)
+            if not chunk:
+                break
+            md5.update(chunk)
+    return md5.hexdigest()
+
+
+def generate_md5_file(filepath):
+    """生成与目标文件同名的 .md5 文件，内容为该文件的 MD5 哈希值
+
+    Args:
+        filepath: 目标文件路径
+
+    Returns:
+        str: 生成的 .md5 文件路径
+    """
+    md5_value = _calc_md5(filepath)
+    md5_file_path = filepath + '.md5'
+    with open(md5_file_path, 'w') as f:
+        f.write(md5_value)
+    print(f"  生成 MD5 文件: {md5_file_path} (md5={md5_value})")
+    return md5_file_path
+
+
+def generate_canonical_image_name(projectcode, image_type, scan_dir=None, minio_client=None, minio_bucket='workorder'):
+    """生成规范化镜像文件名 [projectcode]-[TYPE]-[yyyy-mm-dd]-[序号].image
+
+    序号自增逻辑：扫描本地目录或 MinIO 已有文件，取最大序号 +1
+
+    Args:
+        projectcode: 项目代码（如 JE250629）
+        image_type: 镜像类型（WMS/WCS/FRONTEND）
+        scan_dir: 本地扫描目录（优先）
+        minio_client: MinIO 客户端（本地无目录时回退扫描）
+        minio_bucket: MinIO 存储桶名
+
+    Returns:
+        str: 规范化文件名（不含路径）
+    """
+    today = datetime.now().strftime('%Y-%m-%d')
+    prefix = f"{projectcode}-{image_type}-{today}-"
+
+    max_seq = 0
+    pattern = re.compile(re.escape(prefix) + r'(\d+)\.image$')
+
+    # 扫描本地目录
+    if scan_dir and os.path.isdir(scan_dir):
+        for filename in os.listdir(scan_dir):
+            m = pattern.match(filename)
+            if m:
+                seq = int(m.group(1))
+                if seq > max_seq:
+                    max_seq = seq
+
+    # 扫描 MinIO（本地未找到时回退）
+    if max_seq == 0 and minio_client is not None:
+        try:
+            prefix_minio = f"{projectcode}/images/"
+            objects = minio_client.list_objects(minio_bucket, prefix=prefix_minio, recursive=True)
+            for obj in objects:
+                filename = os.path.basename(obj.object_name)
+                m = pattern.match(filename)
+                if m:
+                    seq = int(m.group(1))
+                    if seq > max_seq:
+                        max_seq = seq
+        except Exception as e:
+            print(f"  警告: 扫描 MinIO 已有文件失败: {e}")
+
+    next_seq = max_seq + 1
+    filename = f"{prefix}{next_seq:02d}.image"
+    print(f"  生成镜像文件名: {filename}")
+    return filename
+
+
+def load_projectcode_status(projectcode, minio_config=None):
+    """加载 projectcode 状态，优先本地，其次 MinIO，再不存在则初始化
+
+    Args:
+        projectcode: 项目代码
+        minio_config: MinIO 配置 dict（endpoint/access_key/secret_key/bucket）
+
+    Returns:
+        dict: 状态字典
+    """
+    local_path = _get_local_status_path(projectcode)
+
+    # 1. 优先读本地
+    if os.path.exists(local_path):
+        with open(local_path, 'r', encoding='utf-8') as f:
+            return json.load(f)
+
+    # 2. 读 MinIO
+    if minio_config:
+        try:
+            client = get_minio_client(
+                minio_config['endpoint'],
+                minio_config['access_key'],
+                minio_config['secret_key'],
+            )
+            bucket = minio_config.get('bucket', 'workorder')
+            local_tmp = local_path + '.tmp'
+            client.fget_object(bucket, f"{projectcode}/status.json", local_tmp)
+            with open(local_tmp, 'r', encoding='utf-8') as f:
+                status = json.load(f)
+            # 缓存到本地
+            os.replace(local_tmp, local_path)
+            return status
+        except Exception:
+            pass  # MinIO 不存在则初始化
+
+    # 3. 初始化
+    expected = collect_expected_branches(projectcode)
+    status = {
+        'projectcode': projectcode,
+        'expected_branches': expected,
+        'completed_branches': [],
+        'first_pack_completed': False,
+        'created_at': datetime.now().isoformat(),
+        'updated_at': datetime.now().isoformat(),
+    }
+    save_projectcode_status(projectcode, status, minio_config)
+    return status
+
+
+def save_projectcode_status(projectcode, status, minio_config=None):
+    """保存 projectcode 状态到本地 + MinIO（双写）
+
+    Args:
+        projectcode: 项目代码
+        status: 状态字典
+        minio_config: MinIO 配置
+    """
+    with _projectcode_lock:
+        status['updated_at'] = datetime.now().isoformat()
+        local_path = _get_local_status_path(projectcode)
+
+        # 写本地
+        with open(local_path, 'w', encoding='utf-8') as f:
+            json.dump(status, f, ensure_ascii=False, indent=2)
+
+        # 写 MinIO
+        if minio_config:
+            try:
+                client = get_minio_client(
+                    minio_config['endpoint'],
+                    minio_config['access_key'],
+                    minio_config['secret_key'],
+                )
+                bucket = minio_config.get('bucket', 'workorder')
+                object_name = f"{projectcode}/status.json"
+                client.fput_object(bucket, object_name, local_path)
+            except Exception as e:
+                print(f"  警告: 同步状态到 MinIO 失败: {e}")
+
+
+def collect_expected_branches(projectcode):
+    """扫描所有 trigger_actions 中 ref_projectcodes 里 projectcode 匹配的分支
+
+    Args:
+        projectcode: 项目代码
+
+    Returns:
+        list: 期望分支列表（去重）
+    """
+    try:
+        import yaml
+        scripts_dir = os.path.dirname(os.path.abspath(__file__))
+        config_path = os.path.join(os.path.dirname(scripts_dir), 'trigger_actions.yaml')
+        with open(config_path, 'r', encoding='utf-8') as f:
+            config = yaml.safe_load(f) or {}
+        actions = config.get('trigger_actions', [])
+        branches = set()
+        for action in actions:
+            ref_projectcodes = action.get('ref_projectcodes', {}) or {}
+            for branch, pc in ref_projectcodes.items():
+                if pc == projectcode:
+                    branches.add(branch)
+        return sorted(branches)
+    except Exception as e:
+        print(f"  警告: 收集期望分支失败: {e}")
+        return []
+
+
+def report_branch_completed(projectcode, branch, image_name, minio_config=None):
+    """上报分支完成状态，并检查是否触发首次打包
+
+    Args:
+        projectcode: 项目代码
+        branch: 完成的分支名
+        image_name: 生成的规范化镜像文件名
+        minio_config: MinIO 配置
+
+    Returns:
+        bool: 是否触发了首次打包
+    """
+    status = load_projectcode_status(projectcode, minio_config)
+
+    if branch not in status['completed_branches']:
+        status['completed_branches'].append(branch)
+        # 记录分支与镜像名的映射
+        if 'branch_images' not in status:
+            status['branch_images'] = {}
+        status['branch_images'][branch] = image_name
+
+    save_projectcode_status(projectcode, status, minio_config)
+
+    # 检查是否所有期望分支都已完成
+    expected = set(status['expected_branches'])
+    completed = set(status['completed_branches'])
+    if expected and expected.issubset(completed) and not status['first_pack_completed']:
+        print(f"  projectcode={projectcode} 所有分支已完成，触发首次打包")
+        pack_and_upload_deploy(projectcode, minio_config)
+        return True
+    return False
+
+
+def orchestrate_image_deploy(image_full, projectcode, image_type, branch, minio_config, docker_registry_url=None, nexus_user=None, nexus_password=None):
+    """统一编排镜像部署流程
+
+    Args:
+        image_full: 完整镜像地址（如 192.168.100.213:8083/wms-bulk:v1）
+        projectcode: 项目代码
+        image_type: 镜像类型（WMS/WCS/FRONTEND）
+        branch: 当前分支名
+        minio_config: MinIO 配置 dict
+        docker_registry_url: Docker 仓库地址（用于 login）
+        nexus_user: Docker 仓库用户名
+        nexus_password: Docker 仓库密码
+
+    Returns:
+        str: 生成的镜像文件名
+    """
+    # 1. 加载状态判断模式
+    status = load_projectcode_status(projectcode, minio_config)
+    first_pack_completed = status.get('first_pack_completed', False)
+
+    # 2. 生成规范化文件名
+    if first_pack_completed:
+        # 增量模式：扫描 MinIO 的 projectcode/images/ 路径
+        minio_client = get_minio_client(
+            minio_config['endpoint'],
+            minio_config['access_key'],
+            minio_config['secret_key'],
+        )
+        image_name = generate_canonical_image_name(
+            projectcode, image_type,
+            minio_client=minio_client,
+            minio_bucket=minio_config.get('bucket', 'workorder'),
+        )
+    else:
+        # 首次模式：扫描本地 workorder/deploy/images/
+        images_dir = get_workorder_images_dir()
+        image_name = generate_canonical_image_name(projectcode, image_type, scan_dir=images_dir)
+
+    # 3. docker save 为规范化文件名
+    if first_pack_completed:
+        # 增量模式：save 到临时目录
+        import tempfile
+        tmp_dir = tempfile.mkdtemp(prefix='deploy_')
+        image_path = os.path.join(tmp_dir, image_name)
+    else:
+        # 首次模式：save 到 workorder/deploy/images/
+        images_dir = get_workorder_images_dir()
+        image_path = os.path.join(images_dir, image_name)
+
+    run_cmd(['docker', 'save', '-o', image_path, image_full])
+    print(f"  镜像已保存: {image_path}")
+
+    # 4. 生成 MD5 文件
+    md5_path = generate_md5_file(image_path)
+
+    # 5. 根据模式处理
+    if first_pack_completed:
+        # 增量模式：直接上传到 MinIO {projectcode}/images/
+        minio_client = get_minio_client(
+            minio_config['endpoint'],
+            minio_config['access_key'],
+            minio_config['secret_key'],
+        )
+        bucket = minio_config.get('bucket', 'workorder')
+        upload_to_minio(minio_client, bucket, image_path, f"{projectcode}/images/{image_name}")
+        upload_to_minio(minio_client, bucket, md5_path, f"{projectcode}/images/{image_name}.md5")
+        # 更新状态
+        report_branch_completed(projectcode, branch, image_name, minio_config)
+        # 清理临时文件
+        try:
+            os.remove(image_path)
+            os.remove(md5_path)
+            os.rmdir(tmp_dir)
+        except OSError:
+            pass
+    else:
+        # 首次模式：文件已保存在 workorder/deploy/images/，更新状态并检查是否触发打包
+        report_branch_completed(projectcode, branch, image_name, minio_config)
+
+    return image_name
+
+
+def orchestrate_file_deploy(local_file_path, projectcode, image_type, branch, minio_config):
+    """统一编排文件类（非 Docker 镜像，如前端 zip）部署流程
+
+    与 orchestrate_image_deploy 类似，但跳过 docker save 步骤，直接处理已下载的本地文件。
+    适用于 acre-web 等前端项目（从 Nexus binary_libs 下载 zip 后处理）。
+
+    Args:
+        local_file_path: 已下载的本地文件路径（如 zip）
+        projectcode: 项目代码
+        image_type: 镜像类型（通常为 FRONTEND）
+        branch: 当前分支名
+        minio_config: MinIO 配置 dict
+
+    Returns:
+        str: 生成的规范化文件名
+    """
+    import shutil as _shutil
+
+    # 1. 加载状态判断模式
+    status = load_projectcode_status(projectcode, minio_config)
+    first_pack_completed = status.get('first_pack_completed', False)
+
+    minio_client = get_minio_client(
+        minio_config['endpoint'],
+        minio_config['access_key'],
+        minio_config['secret_key'],
+    )
+    bucket = minio_config.get('bucket', 'workorder')
+
+    # 2. 生成规范化文件名
+    if first_pack_completed:
+        # 增量模式：扫描 MinIO 的 projectcode/images/ 路径
+        image_name = generate_canonical_image_name(
+            projectcode, image_type,
+            minio_client=minio_client,
+            minio_bucket=bucket,
+        )
+        target_dir = None  # 增量模式直接上传 MinIO
+    else:
+        # 首次模式：扫描本地 workorder/deploy/images/
+        images_dir = get_workorder_images_dir()
+        image_name = generate_canonical_image_name(projectcode, image_type, scan_dir=images_dir)
+        target_dir = images_dir
+
+    # 3. 复制/移动文件到目标位置
+    if target_dir:
+        # 首次模式：移动到 workorder/deploy/images/
+        target_path = os.path.join(target_dir, image_name)
+        _shutil.move(local_file_path, target_path)
+    else:
+        # 增量模式：使用临时路径
+        target_path = local_file_path
+
+    # 4. 生成 MD5 文件
+    md5_path = generate_md5_file(target_path)
+
+    # 5. 根据模式处理
+    if first_pack_completed:
+        # 增量模式：直接上传到 MinIO {projectcode}/images/
+        upload_to_minio(minio_client, bucket, target_path, f"{projectcode}/images/{image_name}")
+        upload_to_minio(minio_client, bucket, md5_path, f"{projectcode}/images/{image_name}.md5")
+        # 更新状态
+        report_branch_completed(projectcode, branch, image_name, minio_config)
+        # 清理临时文件
+        try:
+            os.remove(target_path)
+            os.remove(md5_path)
+        except OSError:
+            pass
+    else:
+        # 首次模式：文件已在 workorder/deploy/images/，更新状态并检查是否触发打包
+        report_branch_completed(projectcode, branch, image_name, minio_config)
+
+    return image_name
+
+
+def pack_and_upload_deploy(projectcode, minio_config):
+    """首次打包：更新 docker-compose.yml，打包 deploy.zip，上传 MinIO
+
+    Args:
+        projectcode: 项目代码
+        minio_config: MinIO 配置 dict
+    """
+    with _pack_lock:
+        # 二次检查 first_pack_completed
+        status = load_projectcode_status(projectcode, minio_config)
+        if status.get('first_pack_completed'):
+            print(f"  projectcode={projectcode} 已完成首次打包，跳过")
+            return
+
+        deploy_dir = get_workorder_deploy_dir()
+        compose_path = os.path.join(deploy_dir, 'docker-compose.yml')
+
+        # 1. 更新 docker-compose.yml 中所有 projectcode 相关服务的 image 字段
+        if os.path.exists(compose_path):
+            _update_compose_for_projectcode(compose_path, projectcode, status)
+        else:
+            print(f"  警告: docker-compose.yml 不存在，跳过更新")
+
+        # 2. 打包 deploy.zip
+        local_zip = os.path.join(deploy_dir, '..', 'deploy.zip')
+        print(f"  打包: {deploy_dir} -> {local_zip}")
+        with zipfile.ZipFile(local_zip, 'w', zipfile.ZIP_DEFLATED) as zf:
+            for root, dirs, files in os.walk(deploy_dir):
+                for filename in files:
+                    file_path = os.path.join(root, filename)
+                    arcname = os.path.relpath(file_path, deploy_dir)
+                    zf.write(file_path, arcname)
+
+        # 3. 生成 deploy.zip.md5
+        md5_path = generate_md5_file(local_zip)
+
+        # 4. 上传到 MinIO {projectcode}/ 路径
+        if minio_config:
+            minio_client = get_minio_client(
+                minio_config['endpoint'],
+                minio_config['access_key'],
+                minio_config['secret_key'],
+            )
+            bucket = minio_config.get('bucket', 'workorder')
+            upload_to_minio(minio_client, bucket, local_zip, f"{projectcode}/deploy.zip")
+            upload_to_minio(minio_client, bucket, md5_path, f"{projectcode}/deploy.zip.md5")
+        else:
+            print(f"  警告: 未配置 MinIO，跳过上传（本地已打包: {local_zip}）")
+
+        # 5. 标记 first_pack_completed=true
+        status['first_pack_completed'] = True
+        save_projectcode_status(projectcode, status, minio_config)
+        print(f"  projectcode={projectcode} 首次打包完成")
+
+
+def _update_compose_for_projectcode(compose_path, projectcode, status):
+    """更新 docker-compose.yml 中所有 projectcode 相关服务的 image 字段
+
+    根据 status['branch_images'] 中记录的镜像文件名更新对应服务的 image 字段
+
+    Args:
+        compose_path: docker-compose.yml 路径
+        projectcode: 项目代码
+        status: projectcode 状态
+    """
+    branch_images = status.get('branch_images', {})
+    if not branch_images:
+        print(f"  警告: projectcode={projectcode} 无分支镜像记录，跳过 compose 更新")
+        return
+
+    with open(compose_path, 'r', encoding='utf-8') as f:
+        lines = f.readlines()
+
+    updated = 0
+    # 收集所有规范化镜像名（如 JE250629-WMS-2026-06-25-01.image）
+    canonical_names = list(branch_images.values())
+
+    for i, line in enumerate(lines):
+        stripped = line.strip()
+        if stripped.startswith('image:'):
+            # 检查是否需要更新（基于 projectcode 前缀匹配）
+            # 这里简化逻辑：将包含 projectcode 的 image 行更新为最新的规范化镜像名
+            # 实际项目中应根据服务名（wms/wcs/frontend）匹配
+            indent = line[:len(line) - len(line.lstrip())]
+            old_image = stripped.split('image:', 1)[1].strip()
+            # 简化：按 image_type 顺序更新（WMS → 第一个，WCS → 第二个...）
+            # 实际应基于服务名映射，这里先按顺序分配
+            # TODO: 根据实际 docker-compose.yml 结构精确匹配
+            pass
+
+    # 简化实现：遍历 branch_images，按 image_type 更新对应服务
+    # 假设 docker-compose.yml 中有 wms/wcs/frontend 服务，按 image_type 匹配
+    type_to_service = {
+        'WMS': ['wms', 'wms-application'],
+        'WCS': ['wcs', 'shdy-dispatch-system'],
+        'FRONTEND': ['frontend', 'acre-web'],
+    }
+
+    # 按类型分组镜像
+    type_images = {}
+    for branch, image_name in branch_images.items():
+        # 从文件名解析类型：JE250629-WMS-2026-06-25-01.image
+        parts = image_name.split('-')
+        if len(parts) >= 2:
+            img_type = parts[1]
+            if img_type not in type_images:
+                type_images[img_type] = image_name
+
+    for img_type, image_name in type_images.items():
+        services = type_to_service.get(img_type, [])
+        for service in services:
+            for i, line in enumerate(lines):
+                stripped = line.strip()
+                if stripped.startswith('image:') and service in stripped.lower():
+                    indent = line[:len(line) - len(line.lstrip())]
+                    old_image = stripped.split('image:', 1)[1].strip()
+                    lines[i] = f"{indent}image: {projectcode}/{image_name}\n"
+                    print(f"  更新服务 {service}: {old_image} -> {projectcode}/{image_name}")
+                    updated += 1
+                    break
+
+    if updated > 0:
+        with open(compose_path, 'w', encoding='utf-8') as f:
+            f.writelines(lines)
+        print(f"  docker-compose.yml 已更新 {updated} 处")
+    else:
+        print(f"  警告: 未找到需要更新的服务镜像")

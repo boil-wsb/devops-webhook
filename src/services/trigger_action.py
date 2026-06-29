@@ -58,6 +58,7 @@ def _match_trigger(action, path_with_namespace, ref):
     project_pattern = action.get('project_pattern', '')
     ref_pattern = action.get('ref_pattern', '')
     ref_patterns = action.get('ref_patterns', [])
+    ref_projectcodes = action.get('ref_projectcodes', {}) or {}
 
     if not project_pattern:
         return False
@@ -66,7 +67,10 @@ def _match_trigger(action, path_with_namespace, ref):
 
     clean_ref = _strip_ref_prefix(ref)
 
-    # 支持 ref_patterns 列表（优先）和 ref_pattern 单值（兼容）
+    # 优先使用 ref_projectcodes 的 key 作为匹配列表（合并 ref_patterns，避免重复配置）
+    if ref_projectcodes:
+        return clean_ref in ref_projectcodes
+    # 兼容 ref_patterns 列表和 ref_pattern 单值
     if ref_patterns:
         return clean_ref in ref_patterns
     if ref_pattern:
@@ -74,7 +78,7 @@ def _match_trigger(action, path_with_namespace, ref):
     return False
 
 
-def _build_env_prefix(variables, path_with_namespace, ref, project_name, pipeline_iid=None):
+def _build_env_prefix(variables, path_with_namespace, ref, project_name, pipeline_iid=None, action=None):
     env_parts = []
     if variables and isinstance(variables, dict):
         for k, v in variables.items():
@@ -84,11 +88,29 @@ def _build_env_prefix(variables, path_with_namespace, ref, project_name, pipelin
     env_parts.append(f"REF={_shell_quote(_strip_ref_prefix(ref))}")
     if pipeline_iid is not None:
         env_parts.append(f"PIPELINE_IID={_shell_quote(str(pipeline_iid))}")
+
+    # 注入 projectcode 与 image_type（从 action 的 ref_projectcodes 与 image_type 解析）
+    if action:
+        clean_ref = _strip_ref_prefix(ref)
+        ref_projectcodes = action.get('ref_projectcodes', {}) or {}
+        if clean_ref in ref_projectcodes:
+            env_parts.append(f"PROJECTCODE={_shell_quote(ref_projectcodes[clean_ref])}")
+        image_type = action.get('image_type', '')
+        if image_type:
+            env_parts.append(f"IMAGE_TYPE={_shell_quote(image_type)}")
+
     return ' '.join(env_parts)
 
 
 def _shell_quote(s):
     return "'" + s.replace("'", "'\\''") + "'"
+
+
+def _ensure_projectcode_status_dir():
+    """确保 projectcode 状态目录存在"""
+    project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    status_dir = os.path.join(project_root, 'workorder', '.projectcode_status')
+    os.makedirs(status_dir, exist_ok=True)
 
 
 def _download_workorder(action):
@@ -210,6 +232,16 @@ def _execute_local(action, path_with_namespace, ref, project_name, pipeline_iid=
     if pipeline_iid is not None:
         env['PIPELINE_IID'] = str(pipeline_iid)
 
+    # 注入 projectcode 与 image_type（从 ref_projectcodes 与 image_type 解析）
+    clean_ref = _strip_ref_prefix(ref)
+    ref_projectcodes = action.get('ref_projectcodes', {}) or {}
+    if clean_ref in ref_projectcodes:
+        env['PROJECTCODE'] = ref_projectcodes[clean_ref]
+        logger.info(f"trigger_action | inject_projectcode | action={name}, ref={clean_ref}, projectcode={env['PROJECTCODE']}")
+    image_type = action.get('image_type', '')
+    if image_type:
+        env['IMAGE_TYPE'] = image_type
+
     try:
         if script_name.endswith('.py'):
             cmd = [sys.executable, script_path]
@@ -261,7 +293,7 @@ def _execute_ssh(action, path_with_namespace, ref, project_name, pipeline_iid=No
         logger.error(f"trigger_action | no_command | action={name}")
         return
 
-    env_prefix = _build_env_prefix(variables, path_with_namespace, ref, project_name, pipeline_iid)
+    env_prefix = _build_env_prefix(variables, path_with_namespace, ref, project_name, pipeline_iid, action=action)
 
     client = paramiko.SSHClient()
     client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
@@ -398,6 +430,8 @@ def get_trigger_actions_config():
             'ssh_host': action.get('ssh_host', ''),
             'ssh_port': action.get('ssh_port', 22),
             'workorder': action.get('workorder', False),
+            'image_type': action.get('image_type', ''),
+            'ref_projectcodes': action.get('ref_projectcodes', {}),
             'variables_keys': list(action.get('variables', {}).keys()) if action.get('variables') else [],
         })
     return result
@@ -494,6 +528,9 @@ def check_and_trigger(path_with_namespace, ref, project_name='', pipeline_iid=No
 
         # workorder 下载（配置 workorder: true 时触发）
         if action.get('workorder'):
+            # 若配置了 ref_projectcodes，确保 projectcode 状态目录存在
+            if action.get('ref_projectcodes'):
+                _ensure_projectcode_status_dir()
             _download_workorder(action)
 
         # 有 SSH 配置则远程执行，否则本地执行
