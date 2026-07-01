@@ -1,6 +1,7 @@
 import json
 import logging
 import requests
+from datetime import datetime
 from src.utils import format_duration, calculate_interval, convert_utc_to_utc8, find_similar_pipeline_records
 from src.config import WEBHOOK_CONFIG, DEFAULT_TARGET_URL, ROUTE_CHAT_ID_MAP
 
@@ -680,9 +681,20 @@ def format_message(payload, running_builds=None, running_builds_lock=None, route
         # 生成并返回消息
         return _build_message(project_name, subtitle, detail_url, message_config, text_tag_list)
     elif status in ['success', 'failed', 'canceled']:
-        # success/failed 时移除记录；canceled 时保留记录（供重新运行复用 message_id）
+        # success/failed 时移除记录；canceled 时标记为已取消（供重新运行复用 message_id，但不再监控超时）
         if status != 'canceled':
             _remove_completed_build(running_builds, running_builds_lock, pipeline_iid, app_logger)
+        else:
+            # canceled 时标记状态，build_monitor 将跳过监控
+            if running_builds and running_builds_lock:
+                try:
+                    with running_builds_lock:
+                        if pipeline_iid in running_builds:
+                            running_builds[pipeline_iid]['status'] = 'canceled'
+                            running_builds[pipeline_iid]['canceled_time'] = datetime.now()
+                            app_logger.info(f"message | mark_canceled | pipeline_iid={pipeline_iid}")
+                except Exception as e:
+                    app_logger.error(f"message | mark_canceled_failed | pipeline_iid={pipeline_iid}, error={e}")
 
         # canceled 状态生成取消卡片，更新已有卡片显示
         if status == 'canceled':

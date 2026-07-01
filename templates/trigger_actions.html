@@ -1436,8 +1436,9 @@
         // ============================================
         let currentPage = 1;
         const pageSize = 20;
-        
-        async function fetchHistory(page = 1) {
+        let lastHistorySignature = '';
+
+        async function fetchHistory(page = 1, force = false) {
             try {
                 currentPage = page;
                 const offset = (page - 1) * pageSize;
@@ -1453,6 +1454,13 @@
                 // 兼容新旧格式：新格式用 data.data，旧格式用 data.history
                 const records = data.data || data.history || [];
                 const pagination = data.pagination || { total: records.length, page: 1, total_pages: 1, has_more: false };
+
+                // 数据未改变时跳过渲染（仅自动刷新场景；手动调用强制刷新）
+                const signature = JSON.stringify({ page, records, pagination });
+                if (!force && signature === lastHistorySignature) {
+                    return;
+                }
+                lastHistorySignature = signature;
                 renderHistory(records, pagination);
             } catch (error) {
                 console.error('获取执行历史失败:', error);
@@ -1462,7 +1470,7 @@
         
         function goToPage(page) {
             if (page >= 1) {
-                fetchHistory(page);
+                fetchHistory(page, true);
             }
         }
 
@@ -1706,7 +1714,7 @@
                     showToast(data.message || '触发成功', 'success');
                     closeTriggerModal();
                     // 稍后刷新历史记录
-                    setTimeout(() => fetchHistory(), 1500);
+                    setTimeout(() => fetchHistory(currentPage, true), 1500);
                 } else {
                     showToast(data.message || '触发失败', 'error');
                 }
@@ -1768,7 +1776,7 @@
         function refreshAll() {
             const icon = document.getElementById('refreshIcon');
             icon.style.animation = 'spin 1s linear infinite';
-            Promise.all([fetchActions(), fetchHistory()]).finally(() => {
+            Promise.all([fetchActions(), fetchHistory(currentPage, true)]).finally(() => {
                 setTimeout(() => {
                     icon.style.animation = '';
                 }, 500);
@@ -1786,7 +1794,7 @@
 
             // 加载数据
             fetchActions();
-            fetchHistory();
+            fetchHistory(1, true);
 
             // 启动自动刷新
             startAutoRefresh();

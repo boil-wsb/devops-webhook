@@ -94,6 +94,10 @@ def check_long_running_builds(running_builds, running_builds_lock):
                     # 打印当前running_builds的内容，用于调试
                     app_logger.debug(f"build_monitor | check | running_count={build_count}")
                     for pipeline_iid, build_info in running_builds.items():
+                        # 跳过已取消的构建（canceled 时保留记录供重新运行复用 message_id，但不再监控超时）
+                        if build_info.get('status') == 'canceled':
+                            app_logger.debug(f"build_monitor | skip_canceled | pipeline_iid={pipeline_iid}")
+                            continue
                         app_logger.debug(f"build_monitor | check_build | pipeline_iid={pipeline_iid}, start_time={build_info['start_time']}")
                         elapsed_time = (current_time - build_info['start_time']).total_seconds()
                         app_logger.debug(f"build_monitor | check_build | elapsed_seconds={elapsed_time}")
