@@ -556,11 +556,14 @@ def _reconcile_minio_state(projectcode, status, minio_config):
         try:
             import tempfile
             tmp_status = tempfile.mktemp(suffix='.json')
-            client.fget_object(bucket, f"{projectcode}/status.json", tmp_status)
-            with open(tmp_status, 'r', encoding='utf-8') as f:
-                remote_status = json.load(f)
-            os.remove(tmp_status)
-            print(f"  对账: 读取 MinIO status.json 成功")
+            try:
+                client.fget_object(bucket, f"{projectcode}/status.json", tmp_status)
+                with open(tmp_status, 'r', encoding='utf-8') as f:
+                    remote_status = json.load(f)
+                print(f"  对账: 读取 MinIO status.json 成功")
+            finally:
+                if os.path.exists(tmp_status):
+                    os.remove(tmp_status)
         except Exception:
             print(f"  对账: MinIO status.json 不存在，按本地为准")
 
