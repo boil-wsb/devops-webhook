@@ -421,24 +421,57 @@ def update_card_via_api(card_content, message_id, callback_id):
         return None
 
 
-def store_sent_card(callback_id, card_content, chat_id=None):
+def store_sent_card(callback_id, card_content, chat_id=None, message_id=None):
+    """持久化已发卡片（方案 2: DB + 内存双层缓存）"""
     if not callback_id:
         return
+    # 内存缓存（快速读取）
     with _sent_cards_lock:
         _sent_cards[callback_id] = {
             'card_content': card_content,
             'chat_id': chat_id,
+            'message_id': message_id,
             'stored_at': time.time()
         }
-        if len(_sent_cards) > 500:
+        if len(_sent_cards) > 1000:
             sorted_keys = sorted(_sent_cards.keys(), key=lambda k: _sent_cards[k]['stored_at'])
-            for k in sorted_keys[:100]:
+            for k in sorted_keys[:200]:
                 del _sent_cards[k]
+    # DB 持久化（重启后可恢复）
+    try:
+        from src.services.database import SentCardDB
+        SentCardDB.upsert(callback_id, message_id=message_id, chat_id=chat_id, card_content=card_content)
+    except Exception as e:
+        logger.warning(f"feishu_notify | sent_card_persist_failed | callback_id={callback_id}, error={e}")
 
 
 def get_sent_card(callback_id):
+    """读取已发卡片（优先内存，未命中查 DB）
+
+    P1 修复: 锁内返回 dict 拷贝，避免锁外访问 dict 时被其他线程修改。
+    """
+    # 优先内存
     with _sent_cards_lock:
-        return _sent_cards.get(callback_id)
+        cached = _sent_cards.get(callback_id)
+        if cached:
+            return dict(cached)  # 返回拷贝，避免锁外竞态
+    # 未命中则查 DB
+    try:
+        from src.services.database import SentCardDB
+        row = SentCardDB.get(callback_id)
+        if row:
+            # 回填内存缓存
+            with _sent_cards_lock:
+                _sent_cards[callback_id] = {
+                    'card_content': row.get('card_content'),
+                    'chat_id': row.get('chat_id'),
+                    'message_id': row.get('message_id'),
+                    'stored_at': time.time()
+                }
+                return dict(_sent_cards[callback_id])  # 锁内返回拷贝
+    except Exception as e:
+        logger.warning(f"feishu_notify | sent_card_db_get_failed | callback_id={callback_id}, error={e}")
+    return None
 
 
 def forward_card_to_assignee(callback_id, assignee_open_id):

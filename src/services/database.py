@@ -180,6 +180,22 @@ def init_database():
                 ON trigger_action_history(project_name, created_at DESC)
             ''')
 
+            # 已发飞书卡片缓存表（方案 2: _sent_cards 持久化）
+            cursor.execute('''
+                CREATE TABLE IF NOT EXISTS sent_cards (
+                    callback_id TEXT PRIMARY KEY,
+                    message_id TEXT,
+                    chat_id TEXT,
+                    card_content TEXT,
+                    sent_at TEXT DEFAULT (datetime('now', '+8 hours'))
+                )
+            ''')
+
+            cursor.execute('''
+                CREATE INDEX IF NOT EXISTS idx_sent_cards_sent_at
+                ON sent_cards(sent_at)
+            ''')
+
             try:
                 cursor.execute('''
                     ALTER TABLE pipeline_records ADD COLUMN updated_at TEXT
@@ -232,7 +248,15 @@ def cleanup_old_records():
 
             deleted_trigger = cursor.rowcount
 
-        app_logger.info(f"database | cleanup | deleted_push={deleted_push}, deleted_pipeline={deleted_pipeline}, deleted_trigger={deleted_trigger}")
+            # 清理 7 天前的 sent_cards（方案 2）
+            cursor.execute('''
+                DELETE FROM sent_cards
+                WHERE sent_at < datetime('now', '-7 days', '+8 hours')
+            ''')
+
+            deleted_cards = cursor.rowcount
+
+        app_logger.info(f"database | cleanup | deleted_push={deleted_push}, deleted_pipeline={deleted_pipeline}, deleted_trigger={deleted_trigger}, deleted_cards={deleted_cards}")
         return deleted_push, deleted_pipeline, deleted_trigger
     except Exception as e:
         app_logger.error(f"database | cleanup_failed | error={e}")
@@ -688,4 +712,78 @@ class TriggerActionHistoryDB:
                 return cursor.fetchone()['count']
         except Exception as e:
             app_logger.error(f"database | get_trigger_history_count_failed | error={e}")
+            return 0
+
+
+class SentCardDB:
+    """已发飞书卡片缓存（方案 2: 替代内存 _sent_cards）"""
+
+    @staticmethod
+    def upsert(callback_id, message_id=None, chat_id=None, card_content=None):
+        """插入或更新已发卡片"""
+        if not callback_id:
+            return
+        try:
+            content_str = json.dumps(card_content) if card_content else None
+            with get_db_cursor() as cursor:
+                cursor.execute('''
+                    INSERT INTO sent_cards (callback_id, message_id, chat_id, card_content, sent_at)
+                    VALUES (?, ?, ?, ?, datetime('now', '+8 hours'))
+                    ON CONFLICT(callback_id) DO UPDATE SET
+                        message_id = COALESCE(excluded.message_id, message_id),
+                        chat_id = COALESCE(excluded.chat_id, chat_id),
+                        card_content = COALESCE(excluded.card_content, card_content),
+                        sent_at = datetime('now', '+8 hours')
+                ''', (callback_id, message_id, chat_id, content_str))
+        except Exception as e:
+            app_logger.error(f"database | sent_card_upsert_failed | callback_id={callback_id}, error={e}")
+
+    @staticmethod
+    def get(callback_id):
+        """读取已发卡片"""
+        try:
+            with get_db_cursor() as cursor:
+                cursor.execute(
+                    'SELECT message_id, chat_id, card_content, sent_at FROM sent_cards WHERE callback_id = ?',
+                    (callback_id,)
+                )
+                row = cursor.fetchone()
+                if not row:
+                    return None
+                card_content = None
+                if row['card_content']:
+                    try:
+                        card_content = json.loads(row['card_content'])
+                    except Exception:
+                        card_content = None
+                return {
+                    'message_id': row['message_id'],
+                    'chat_id': row['chat_id'],
+                    'card_content': card_content,
+                    'stored_at': row['sent_at']
+                }
+        except Exception as e:
+            app_logger.error(f"database | sent_card_get_failed | callback_id={callback_id}, error={e}")
+            return None
+
+    @staticmethod
+    def delete(callback_id):
+        """删除已发卡片"""
+        try:
+            with get_db_cursor() as cursor:
+                cursor.execute('DELETE FROM sent_cards WHERE callback_id = ?', (callback_id,))
+        except Exception as e:
+            app_logger.error(f"database | sent_card_delete_failed | callback_id={callback_id}, error={e}")
+
+    @staticmethod
+    def cleanup_old(days=7):
+        """清理指定天数前的记录"""
+        try:
+            with get_db_cursor() as cursor:
+                cursor.execute(
+                    "DELETE FROM sent_cards WHERE sent_at < datetime('now', '-{} days', '+8 hours')".format(days)
+                )
+                return cursor.rowcount
+        except Exception as e:
+            app_logger.error(f"database | sent_card_cleanup_failed | error={e}")
             return 0

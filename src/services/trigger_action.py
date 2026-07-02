@@ -12,6 +12,9 @@ SCRIPTS_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', '..
 TRIGGER_ACTIONS_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', '..', 'trigger_actions.yaml')
 WORKORDER_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', '..', 'workorder')
 
+# 本地执行子进程默认超时（秒），可被 action.timeout 覆盖
+DEFAULT_LOCAL_EXEC_TIMEOUT = 1800
+
 _trigger_actions_cache = {'actions': None, 'mtime': 0}
 _trigger_actions_lock = threading.Lock()
 
@@ -213,6 +216,14 @@ def _execute_local(action, path_with_namespace, ref, project_name, pipeline_iid=
     script_name = action.get('script', '')
     variables = action.get('variables', {})
 
+    # per-action 超时覆盖（秒）
+    try:
+        timeout = int(action.get('timeout', DEFAULT_LOCAL_EXEC_TIMEOUT))
+    except (TypeError, ValueError):
+        timeout = DEFAULT_LOCAL_EXEC_TIMEOUT
+    if timeout <= 0:
+        timeout = DEFAULT_LOCAL_EXEC_TIMEOUT
+
     if not script_name:
         logger.error(f"trigger_action | no_script | action={name}")
         return
@@ -252,7 +263,7 @@ def _execute_local(action, path_with_namespace, ref, project_name, pipeline_iid=
             env=env,
             capture_output=True,
             text=True,
-            timeout=300
+            timeout=timeout
         )
         success = result.returncode == 0
         output = result.stdout
@@ -264,9 +275,17 @@ def _execute_local(action, path_with_namespace, ref, project_name, pipeline_iid=
             logger.error(f"trigger_action | local_result | action={name}, script={script_name}, exit_code={result.returncode}, stderr_len={len(error_output.strip())}, stdout_tail={(output or '').strip()[-500:]!r}")
 
         _notify_result(name, project_name, ref, success, output, error_output, result.returncode, 'local', variables, trigger_source, pipeline_iid, start_time)
-    except subprocess.TimeoutExpired:
-        logger.error(f"trigger_action | local_result | action={name}, script={script_name}, result=timeout")
-        _notify_result(name, project_name, ref, False, '', '本地执行超时(300s)', None, 'local', variables, trigger_source, pipeline_iid, start_time)
+    except subprocess.TimeoutExpired as e:
+        # 提取超时前已捕获的部分输出，便于定位卡在哪一步
+        partial_out = (e.output or '').strip()[-500:] if e.output else ''
+        partial_err = (e.stderr or '').strip()[-500:] if e.stderr else ''
+        logger.error(f"trigger_action | local_result | action={name}, script={script_name}, result=timeout, timeout={timeout}s, stdout_tail={partial_out!r}, stderr_tail={partial_err!r}")
+        error_msg = f'本地执行超时({timeout}s)'
+        if partial_err:
+            error_msg = f'{error_msg}\nstderr_tail: {partial_err}'
+        if partial_out:
+            error_msg = f'{error_msg}\nstdout_tail: {partial_out}'
+        _notify_result(name, project_name, ref, False, partial_out, error_msg, None, 'local', variables, trigger_source, pipeline_iid, start_time)
     except Exception as e:
         logger.error(f"trigger_action | local_result | action={name}, script={script_name}, result=exception, error={e}")
         _notify_result(name, project_name, ref, False, '', str(e), None, 'local', variables, trigger_source, pipeline_iid, start_time)
@@ -274,6 +293,7 @@ def _execute_local(action, path_with_namespace, ref, project_name, pipeline_iid=
 
 def _execute_ssh(action, path_with_namespace, ref, project_name, pipeline_iid=None, trigger_source='auto', start_time=None):
     import paramiko
+    import socket
     if start_time is None:
         start_time = datetime.now()
     name = action.get('name', 'unknown')
@@ -284,6 +304,14 @@ def _execute_ssh(action, path_with_namespace, ref, project_name, pipeline_iid=No
     script_name = action.get('script', '')
     ssh_command = action.get('ssh_command', '')
     variables = action.get('variables', {})
+
+    # per-action 超时覆盖（秒）
+    try:
+        timeout = int(action.get('timeout', DEFAULT_LOCAL_EXEC_TIMEOUT))
+    except (TypeError, ValueError):
+        timeout = DEFAULT_LOCAL_EXEC_TIMEOUT
+    if timeout <= 0:
+        timeout = DEFAULT_LOCAL_EXEC_TIMEOUT
 
     if not all([host, user, password]):
         logger.error(f"trigger_action | ssh_config_incomplete | action={name}")
@@ -317,7 +345,7 @@ def _execute_ssh(action, path_with_namespace, ref, project_name, pipeline_iid=No
         else:
             command = f"{env_prefix} bash -c {_shell_quote(ssh_command)}"
 
-        stdin, stdout, stderr = client.exec_command(command)
+        stdin, stdout, stderr = client.exec_command(command, timeout=timeout)
         exit_code = stdout.channel.recv_exit_status()
         output = stdout.read().decode('utf-8', errors='replace')
         error_output = stderr.read().decode('utf-8', errors='replace')
@@ -331,6 +359,15 @@ def _execute_ssh(action, path_with_namespace, ref, project_name, pipeline_iid=No
                 client.exec_command(f"rm -f {remote_script}")
 
         _notify_result(name, project_name, ref, success, output, error_output, exit_code, host, variables, trigger_source, pipeline_iid, start_time)
+    except socket.timeout:
+        # 远程执行超时（channel 无数据流动超过 timeout 秒）
+        logger.error(f"trigger_action | ssh_result | action={name}, host={host}, script={script_name or ssh_command}, result=timeout, timeout={timeout}s")
+        if script_name:
+            try:
+                client.exec_command(f"rm -f {remote_script}")
+            except Exception:
+                pass
+        _notify_result(name, project_name, ref, False, '', f'SSH 远程执行超时({timeout}s)', None, host, variables, trigger_source, pipeline_iid, start_time)
     except paramiko.AuthenticationException:
         logger.error(f"trigger_action | ssh_result | action={name}, host={host}:{port}, result=auth_failed")
         _notify_result(name, project_name, ref, False, '', f'SSH 认证失败: {user}@{host}:{port}', None, host, variables, trigger_source, pipeline_iid, start_time)

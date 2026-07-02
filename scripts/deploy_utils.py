@@ -622,7 +622,20 @@ def report_branch_completed(projectcode, branch, image_name, minio_config=None):
     return False
 
 
-_reconcile_lock = threading.Lock()
+_reconcile_lock = threading.Lock()  # 保留用于内部子步骤保护
+
+
+# 方案 4: projectcode 级别并发控制（同 projectcode 串行，不同 projectcode 并行）
+_projectcode_locks = {}
+_projectcode_locks_guard = threading.Lock()
+
+
+def _get_projectcode_lock(projectcode):
+    """获取 projectcode 级别的锁（惰性创建）"""
+    with _projectcode_locks_guard:
+        if projectcode not in _projectcode_locks:
+            _projectcode_locks[projectcode] = threading.Lock()
+        return _projectcode_locks[projectcode]
 
 
 def _reconcile_nexus_state(projectcode, current_branch, status):
@@ -638,7 +651,8 @@ def _reconcile_nexus_state(projectcode, current_branch, status):
        c. 不存在 → 跳过，等待该分支 pipeline 触发
 
     注意：本函数仅查询 Nexus，不涉及 MinIO。调用方负责后续的 save_projectcode_status。
-    并发安全：使用 _reconcile_lock 防止多分支同时触发时重复对账下载。
+    并发安全：调用方（orchestrate_image_deploy / orchestrate_file_deploy）已持有
+    _get_projectcode_lock(projectcode)，同 projectcode 串行执行，无需额外加锁。
 
     Args:
         projectcode: 项目代码
@@ -648,152 +662,164 @@ def _reconcile_nexus_state(projectcode, current_branch, status):
     Returns:
         dict: 对账后的 status
     """
-    with _reconcile_lock:
-        try:
-            import yaml
-            import importlib.util
+    try:
+        import yaml
+        import importlib.util
 
-            # 1. 扫描 trigger_actions.yaml，找到相同 projectcode 的所有项目分支
-            #    例如 projectcode=JE250629 关联：
-            #      - wms-application / dev-bulk (WMS)
-            #      - shdy-dispatch-system / dev-1.0.250624 (WCS)
-            #      - acre-web / wms-east-hope (FRONTEND)
-            scripts_dir = os.path.dirname(os.path.abspath(__file__))
-            config_path = os.path.join(os.path.dirname(scripts_dir), 'trigger_actions.yaml')
-            with open(config_path, 'r', encoding='utf-8') as f:
-                config = yaml.safe_load(f) or {}
-            actions = config.get('trigger_actions', [])
+        # 1. 扫描 trigger_actions.yaml，找到相同 projectcode 的所有项目分支
+        #    例如 projectcode=JE250629 关联：
+        #      - wms-application / dev-bulk (WMS)
+        #      - shdy-dispatch-system / dev-1.0.250624 (WCS)
+        #      - acre-web / wms-east-hope (FRONTEND)
+        scripts_dir = os.path.dirname(os.path.abspath(__file__))
+        config_path = os.path.join(os.path.dirname(scripts_dir), 'trigger_actions.yaml')
+        with open(config_path, 'r', encoding='utf-8') as f:
+            config = yaml.safe_load(f) or {}
+        actions = config.get('trigger_actions', [])
 
-            project_branches = {}  # branch -> action config
-            for action in actions:
-                ref_projectcodes = action.get('ref_projectcodes', {}) or {}
-                for branch, pc in ref_projectcodes.items():
-                    if pc == projectcode:
-                        project_branches[branch] = action
+        project_branches = {}  # branch -> action config
+        for action in actions:
+            ref_projectcodes = action.get('ref_projectcodes', {}) or {}
+            for branch, pc in ref_projectcodes.items():
+                if pc == projectcode:
+                    project_branches[branch] = action
 
-            if not project_branches:
-                return status
+        if not project_branches:
+            return status
 
-            # 2. 确认相同 projectcode 的项目对应分支是否已在 Nexus 存在产物
-            images_dir = get_workorder_images_dir()
-            os.makedirs(images_dir, exist_ok=True)
-            existing_completed = set(status.get('completed_branches', []))
+        # 2. 确认相同 projectcode 的项目对应分支是否已在 Nexus 存在产物
+        images_dir = get_workorder_images_dir()
+        os.makedirs(images_dir, exist_ok=True)
+        existing_completed = set(status.get('completed_branches', []))
 
-            for branch, action in project_branches.items():
-                # 跳过当前触发的分支（由调用方处理下载）
-                if branch == current_branch:
-                    continue
-                # 跳过已完成分支
-                if branch in existing_completed:
-                    continue
+        for branch, action in project_branches.items():
+            # 跳过当前触发的分支（由调用方处理下载）
+            if branch == current_branch:
+                continue
+            # 跳过已完成分支（但需验证对应产物文件实际存在，否则重新下载）
+            if branch in existing_completed:
+                cached_image = status.get('branch_images', {}).get(branch, '')
+                if cached_image:
+                    cached_path = os.path.join(images_dir, cached_image)
+                    if os.path.exists(cached_path) and os.path.exists(cached_path + '.md5'):
+                        continue  # 产物文件存在，跳过
+                    print(f"  对账: {branch} 已标记完成但产物缺失，重新下载")
+                else:
+                    print(f"  对账: {branch} 已标记完成但无文件名记录，重新下载")
 
-                variables = action.get('variables', {}) or {}
-                nexus_url = variables.get('NEXUS_URL', '')
-                nexus_user = variables.get('NEXUS_USER', '')
-                nexus_password = variables.get('NEXUS_PASSWORD', '')
-                docker_registry_url = variables.get('DOCKER_REGISTRY_URL', '')
-                script_name = action.get('script', '')
-                image_type = action.get('image_type', '')
+            variables = action.get('variables', {}) or {}
+            nexus_url = variables.get('NEXUS_URL', '')
+            nexus_user = variables.get('NEXUS_USER', '')
+            nexus_password = variables.get('NEXUS_PASSWORD', '')
+            docker_registry_url = variables.get('DOCKER_REGISTRY_URL', '')
+            script_name = action.get('script', '')
+            image_type = action.get('image_type', '')
 
-                if not nexus_url or not nexus_user:
-                    print(f"  对账跳过: {branch} (缺少 Nexus 配置)")
-                    continue
+            if not nexus_url or not nexus_user:
+                print(f"  对账跳过: {branch} (缺少 Nexus 配置)")
+                continue
 
-                # 动态导入对应脚本模块
-                script_path = os.path.join(scripts_dir, script_name)
-                if not os.path.exists(script_path):
-                    print(f"  对账跳过: {branch} (脚本 {script_name} 不存在)")
-                    continue
+            # 动态导入对应脚本模块
+            script_path = os.path.join(scripts_dir, script_name)
+            if not os.path.exists(script_path):
+                print(f"  对账跳过: {branch} (脚本 {script_name} 不存在)")
+                continue
 
-                try:
-                    mod_name = script_name.replace('.py', '').replace('-', '_')
-                    spec = importlib.util.spec_from_file_location(mod_name, script_path)
-                    mod = importlib.util.module_from_spec(spec)
-                    spec.loader.exec_module(mod)
+            try:
+                mod_name = script_name.replace('.py', '').replace('-', '_')
+                spec = importlib.util.spec_from_file_location(mod_name, script_path)
+                mod = importlib.util.module_from_spec(spec)
+                spec.loader.exec_module(mod)
 
-                    # 3a. Docker 镜像类：确认 Nexus docker-hosted 是否有该分支最新镜像
-                    if hasattr(mod, 'search_docker_image'):
-                        # 不传 IID，取该分支最新产物
-                        image = mod.search_docker_image(nexus_url, nexus_user, nexus_password, branch)
-                        if not image:
-                            print(f"  对账: {branch} 在 Nexus 未找到镜像，等待 pipeline 触发")
-                            continue
-
-                        image_full = f"{docker_registry_url}/{image['name']}:{image['version']}"
-                        print(f"  对账: {branch} 找到最新镜像 {image_full} (iid={image['iid']})")
-
-                        # 生成规范化文件名 + docker login + pull + save
-                        image_name = generate_canonical_image_name(
-                            projectcode, image_type, scan_dir=images_dir
-                        )
-                        image_path = os.path.join(images_dir, image_name)
-                        run_cmd(['docker', 'login', docker_registry_url, '-u', nexus_user, '-p', nexus_password])
-                        run_cmd(['docker', 'pull', image_full])
-                        run_cmd(['docker', 'save', '-o', image_path, image_full])
-                        generate_md5_file(image_path)
-                        print(f"  对账: {branch} 镜像已保存 {image_name}")
-
-                    # 3b. 前端 zip 类：确认 Nexus binary_libs 是否有该分支最新 zip
-                    elif hasattr(mod, 'search_binary_libs'):
-                        # 不传 IID，取该分支最新产物
-                        binary = mod.search_binary_libs(nexus_url, nexus_user, nexus_password, branch)
-                        if not binary:
-                            print(f"  对账: {branch} 在 Nexus 未找到 zip，等待 pipeline 触发")
-                            continue
-
-                        download_url = binary.get('download_url', '')
-                        if not download_url:
-                            print(f"  对账: {branch} 无下载 URL")
-                            continue
-
-                        print(f"  对账: {branch} 找到最新 zip {binary['name']}")
-
-                        # 生成规范化文件名 + 下载
-                        image_name = generate_canonical_image_name(
-                            projectcode, image_type, scan_dir=images_dir
-                        )
-                        target_path = os.path.join(images_dir, image_name)
-
-                        import requests as _requests
-                        session = _requests.Session()
-                        session.auth = (nexus_user, nexus_password)
-                        resp = session.get(download_url, stream=True, timeout=120)
-                        if resp.status_code == 401 and session.auth:
-                            session.auth = None
-                            resp = session.get(download_url, stream=True, timeout=120)
-                        if resp.status_code != 200:
-                            print(f"  对账: {branch} 下载失败 status={resp.status_code}")
-                            continue
-                        with open(target_path, 'wb') as f:
-                            for chunk in resp.iter_content(chunk_size=8 * 1024 * 1024):
-                                f.write(chunk)
-                        generate_md5_file(target_path)
-                        print(f"  对账: {branch} zip 已保存 {image_name}")
-
-                    else:
-                        print(f"  对账跳过: {branch} (脚本 {script_name} 无 search 函数)")
+                # 3a. Docker 镜像类：确认 Nexus docker-hosted 是否有该分支最新镜像
+                if hasattr(mod, 'search_docker_image'):
+                    # 不传 IID，取该分支最新产物
+                    image = mod.search_docker_image(nexus_url, nexus_user, nexus_password, branch)
+                    if not image:
+                        print(f"  对账: {branch} 在 Nexus 未找到镜像，等待 pipeline 触发")
                         continue
 
-                    # 标记该分支完成
-                    if branch not in status['completed_branches']:
-                        status['completed_branches'].append(branch)
-                    if 'branch_images' not in status:
-                        status['branch_images'] = {}
-                    status['branch_images'][branch] = image_name
+                    image_full = f"{docker_registry_url}/{image['name']}:{image['version']}"
+                    print(f"  对账: {branch} 找到最新镜像 {image_full} (iid={image['iid']})")
 
-                except Exception as e:
-                    print(f"  对账查询失败: {branch}, error={e}")
+                    # 生成规范化文件名 + docker login + pull + save
+                    image_name = generate_canonical_image_name(
+                        projectcode, image_type, scan_dir=images_dir
+                    )
+                    image_path = os.path.join(images_dir, image_name)
+                    run_cmd(['docker', 'login', docker_registry_url, '-u', nexus_user, '-p', nexus_password])
+                    run_cmd(['docker', 'pull', image_full])
+                    run_cmd(['docker', 'save', '-o', image_path, image_full])
+                    generate_md5_file(image_path)
+                    print(f"  对账: {branch} 镜像已保存 {image_name}")
+
+                # 3b. 前端 zip 类：确认 Nexus binary_libs 是否有该分支最新 zip
+                elif hasattr(mod, 'search_binary_libs'):
+                    # 不传 IID，取该分支最新产物
+                    binary = mod.search_binary_libs(nexus_url, nexus_user, nexus_password, branch)
+                    if not binary:
+                        print(f"  对账: {branch} 在 Nexus 未找到 zip，等待 pipeline 触发")
+                        continue
+
+                    download_url = binary.get('download_url', '')
+                    if not download_url:
+                        print(f"  对账: {branch} 无下载 URL")
+                        continue
+
+                    print(f"  对账: {branch} 找到最新 zip {binary['name']}")
+
+                    # 生成规范化文件名 + 下载
+                    image_name = generate_canonical_image_name(
+                        projectcode, image_type, scan_dir=images_dir
+                    )
+                    target_path = os.path.join(images_dir, image_name)
+
+                    import requests as _requests
+                    session = _requests.Session()
+                    session.auth = (nexus_user, nexus_password)
+                    resp = session.get(download_url, stream=True, timeout=120)
+                    if resp.status_code == 401 and session.auth:
+                        session.auth = None
+                        resp = session.get(download_url, stream=True, timeout=120)
+                    if resp.status_code != 200:
+                        print(f"  对账: {branch} 下载失败 status={resp.status_code}")
+                        continue
+                    with open(target_path, 'wb') as f:
+                        for chunk in resp.iter_content(chunk_size=8 * 1024 * 1024):
+                            f.write(chunk)
+                    generate_md5_file(target_path)
+                    print(f"  对账: {branch} zip 已保存 {image_name}")
+
+                else:
+                    print(f"  对账跳过: {branch} (脚本 {script_name} 无 search 函数)")
                     continue
 
-            print(f"  对账完成: completed_branches={status.get('completed_branches', [])}")
-            return status
-        except Exception as e:
-            print(f"  警告: 对账 Nexus 失败: {e}")
-            return status
+                # 标记该分支完成
+                if branch not in status['completed_branches']:
+                    status['completed_branches'].append(branch)
+                if 'branch_images' not in status:
+                    status['branch_images'] = {}
+                status['branch_images'][branch] = image_name
+
+            except Exception as e:
+                print(f"  对账查询失败: {branch}, error={e}")
+                continue
+
+        print(f"  对账完成: completed_branches={status.get('completed_branches', [])}")
+        return status
+    except Exception as e:
+        print(f"  警告: 对账 Nexus 失败: {e}")
+        return status
 
 
 def orchestrate_image_deploy(image_full, projectcode, image_type, branch, minio_config, docker_registry_url=None, nexus_user=None, nexus_password=None):
-    """统一编排镜像部署流程
+    """统一编排镜像部署流程（方案 4: projectcode 级别加锁，同 pc 串行）"""
+    with _get_projectcode_lock(projectcode):
+        return _orchestrate_image_deploy_impl(image_full, projectcode, image_type, branch, minio_config, docker_registry_url=docker_registry_url, nexus_user=nexus_user, nexus_password=nexus_password)
+
+
+def _orchestrate_image_deploy_impl(image_full, projectcode, image_type, branch, minio_config, docker_registry_url=None, nexus_user=None, nexus_password=None):
+    """统一编排镜像部署流程实现
 
     Args:
         image_full: 完整镜像地址（如 192.168.100.213:8083/wms-bulk:v1）
@@ -831,10 +857,19 @@ def orchestrate_image_deploy(image_full, projectcode, image_type, branch, minio_
             status = load_projectcode_status(projectcode, minio_config)
             first_pack_completed = status.get('first_pack_completed', False)
 
-    # 1.6 如果当前分支已在对账完成的列表中，跳过下载
+    # 1.6 如果当前分支已在对账完成的列表中，验证产物文件存在性
     if branch in status.get('completed_branches', []):
-        print(f"  当前分支 {branch} 已对账完成，跳过下载")
-        return status.get('branch_images', {}).get(branch, '')
+        cached_image = status.get('branch_images', {}).get(branch, '')
+        # 首次模式：检查本地 deploy/images/ 是否有对应产物文件
+        if not first_pack_completed and cached_image:
+            cached_path = os.path.join(get_workorder_images_dir(), cached_image)
+            if os.path.exists(cached_path) and os.path.exists(cached_path + '.md5'):
+                print(f"  当前分支 {branch} 已对账完成且产物存在，跳过下载")
+                return cached_image
+            print(f"  当前分支 {branch} 已标记完成但产物缺失，重新生成")
+        else:
+            print(f"  当前分支 {branch} 已标记完成，跳过下载")
+            return cached_image
 
     # 2. 生成规范化文件名
     if first_pack_completed:
@@ -899,7 +934,13 @@ def orchestrate_image_deploy(image_full, projectcode, image_type, branch, minio_
 
 
 def orchestrate_file_deploy(local_file_path, projectcode, image_type, branch, minio_config):
-    """统一编排文件类（非 Docker 镜像，如前端 zip）部署流程
+    """统一编排文件类部署流程（方案 4: projectcode 级别加锁）"""
+    with _get_projectcode_lock(projectcode):
+        return _orchestrate_file_deploy_impl(local_file_path, projectcode, image_type, branch, minio_config)
+
+
+def _orchestrate_file_deploy_impl(local_file_path, projectcode, image_type, branch, minio_config):
+    """统一编排文件类（非 Docker 镜像，如前端 zip）部署流程实现
 
     与 orchestrate_image_deploy 类似，但跳过 docker save 步骤，直接处理已下载的本地文件。
     适用于 acre-web 等前端项目（从 Nexus binary_libs 下载 zip 后处理）。
@@ -938,10 +979,19 @@ def orchestrate_file_deploy(local_file_path, projectcode, image_type, branch, mi
             status = load_projectcode_status(projectcode, minio_config)
             first_pack_completed = status.get('first_pack_completed', False)
 
-    # 1.6 如果当前分支已在对账完成的列表中，跳过下载
+    # 1.6 如果当前分支已在对账完成的列表中，验证产物文件存在性
     if branch in status.get('completed_branches', []):
-        print(f"  当前分支 {branch} 已对账完成，跳过下载")
-        return status.get('branch_images', {}).get(branch, '')
+        cached_image = status.get('branch_images', {}).get(branch, '')
+        # 首次模式：检查本地 deploy/images/ 是否有对应产物文件
+        if not first_pack_completed and cached_image:
+            cached_path = os.path.join(get_workorder_images_dir(), cached_image)
+            if os.path.exists(cached_path) and os.path.exists(cached_path + '.md5'):
+                print(f"  当前分支 {branch} 已对账完成且产物存在，跳过下载")
+                return cached_image
+            print(f"  当前分支 {branch} 已标记完成但产物缺失，重新生成")
+        else:
+            print(f"  当前分支 {branch} 已标记完成，跳过下载")
+            return cached_image
 
     minio_client = get_minio_client(
         minio_config['endpoint'],
@@ -1000,11 +1050,14 @@ def orchestrate_file_deploy(local_file_path, projectcode, image_type, branch, mi
 def pack_and_upload_deploy(projectcode, minio_config):
     """首次打包：更新 docker-compose.yml，打包 deploy.zip，上传 MinIO
 
+    P1 修复: 使用 projectcode 级别锁替代全局 _pack_lock，
+    避免不同 projectcode 的 pack 串行化。
+
     Args:
         projectcode: 项目代码
         minio_config: MinIO 配置 dict
     """
-    with _pack_lock:
+    with _get_projectcode_lock(projectcode):
         # 二次检查 first_pack_completed
         status = load_projectcode_status(projectcode, minio_config)
         if status.get('first_pack_completed'):

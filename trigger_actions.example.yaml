@@ -6,6 +6,7 @@
 # - 脚本文件统一放置在 scripts/ 目录下
 # - variables 中的变量会作为环境变量注入到执行环境中
 # - workorder: true → 触发前从 MinIO 下载 workorder/deploy.zip（MD5 一致则跳过）
+# - timeout: 执行超时（秒，可选，默认 1800；本地执行与 SSH 远程执行均生效）
 # - 修改此文件后自动热更新，无需重启服务
 #
 # 注意：本地执行 Docker 相关脚本需要：
@@ -32,6 +33,7 @@ trigger_actions:
   - name: "shdy-dispatch-system-deploy"
     project_pattern: "shdy-dispatch-system"
     workorder: true
+    timeout: 1800  # 本地执行超时（秒），默认 1800
     ref_patterns:
       - "dev-1.0.250509-shenhuo"
       - "dev-1.0.250624"
