@@ -83,6 +83,106 @@ def get_workorder_deploy_dir():
     return os.path.join(project_root, 'workorder', 'deploy')
 
 
+def _ensure_base_deploy_package(minio_config):
+    """确保基准部署包已从 MinIO 下载并解压到 workorder/deploy/
+
+    在 orchestrate_image_deploy / orchestrate_file_deploy 处理前调用。
+    从 MinIO workorder 路径下载通用 deploy.zip（基准包），解压到
+    workorder/deploy/ 作为后续镜像 save 和打包的基础。
+
+    流程：
+    1. 从 MinIO 下载 deploy.zip.md5
+    2. 本地 MD5 一致则跳过下载
+    3. 否则下载 deploy.zip
+    4. 已解压且 MD5 标记一致则跳过解压
+    5. 否则解压到 workorder/deploy/ 并写入 .zip_md5 标记
+
+    Args:
+        minio_config: MinIO 配置 dict（endpoint/access_key/secret_key/bucket）
+    """
+    import zipfile
+
+    if not minio_config:
+        ensure_workorder_dirs()
+        return
+
+    try:
+        client = get_minio_client(
+            minio_config['endpoint'],
+            minio_config['access_key'],
+            minio_config['secret_key'],
+        )
+        bucket = minio_config.get('bucket', 'workorder')
+
+        project_root = _get_project_root()
+        workorder_dir = os.path.join(project_root, 'workorder')
+        local_zip = os.path.join(workorder_dir, 'deploy.zip')
+        local_md5 = os.path.join(workorder_dir, 'deploy.zip.md5')
+        extract_dir = os.path.join(workorder_dir, 'deploy')
+
+        os.makedirs(workorder_dir, exist_ok=True)
+
+        # 1. 下载远程 MD5
+        remote_md5_value = ''
+        try:
+            client.fget_object(bucket, 'deploy.zip.md5', local_md5)
+            with open(local_md5, 'r') as f:
+                remote_md5_value = f.read().strip()
+        except Exception:
+            print("  基准包: MinIO 无 deploy.zip.md5，仅确保目录存在")
+            ensure_workorder_dirs()
+            return
+
+        # 2. 检查本地是否需要下载
+        need_download = True
+        if os.path.exists(local_zip):
+            local_md5_value = _calc_md5(local_zip)
+            if local_md5_value == remote_md5_value:
+                need_download = False
+                print(f"  基准包: 本地 MD5 一致，跳过下载")
+            else:
+                print(f"  基准包: MD5 不一致，重新下载")
+
+        # 3. 下载 deploy.zip
+        if need_download:
+            client.fget_object(bucket, 'deploy.zip', local_zip)
+            local_md5_value = _calc_md5(local_zip)
+            if local_md5_value != remote_md5_value:
+                print(f"  基准包: 下载后 MD5 校验失败")
+            else:
+                print(f"  基准包: 下载完成")
+
+        # 4. 检查是否需要解压
+        extract_md5_file = os.path.join(extract_dir, '.zip_md5')
+        need_extract = need_download or not os.path.exists(extract_dir) or not os.path.exists(extract_md5_file)
+
+        if not need_extract and os.path.exists(extract_md5_file):
+            with open(extract_md5_file, 'r') as f:
+                cached_md5 = f.read().strip()
+            if cached_md5 == remote_md5_value:
+                print(f"  基准包: 已解压且 MD5 一致，跳过解压")
+                images_dir = os.path.join(extract_dir, 'images')
+                os.makedirs(images_dir, exist_ok=True)
+                return
+
+        # 5. 解压
+        with zipfile.ZipFile(local_zip, 'r') as zf:
+            zf.extractall(extract_dir)
+
+        with open(extract_md5_file, 'w') as f:
+            f.write(remote_md5_value)
+
+        print(f"  基准包: 解压完成到 {extract_dir}")
+
+        # 确保 images 目录存在
+        images_dir = os.path.join(extract_dir, 'images')
+        os.makedirs(images_dir, exist_ok=True)
+
+    except Exception as e:
+        print(f"  警告: 基准包准备失败: {e}")
+        ensure_workorder_dirs()
+
+
 def update_compose_image(compose_path, image_name, new_image_full):
     """更新 docker-compose.yml 中匹配 image_name 的服务镜像
 
@@ -708,6 +808,10 @@ def orchestrate_image_deploy(image_full, projectcode, image_type, branch, minio_
     Returns:
         str: 生成的镜像文件名
     """
+    # 0. 确保基准包已从 MinIO 下载并解压到 workorder/deploy/
+    #    首次模式打包容镜像到 deploy/images/，增量模式不影响（基准包已存在则跳过）
+    _ensure_base_deploy_package(minio_config)
+
     # 1. 加载状态判断模式
     status = load_projectcode_status(projectcode, minio_config)
     first_pack_completed = status.get('first_pack_completed', False)
@@ -811,6 +915,9 @@ def orchestrate_file_deploy(local_file_path, projectcode, image_type, branch, mi
         str: 生成的规范化文件名
     """
     import shutil as _shutil
+
+    # 0. 确保基准包已从 MinIO 下载并解压到 workorder/deploy/
+    _ensure_base_deploy_package(minio_config)
 
     # 1. 加载状态判断模式
     status = load_projectcode_status(projectcode, minio_config)
