@@ -773,3 +773,10 @@ def register_routes(app):
         result = manual_trigger(action_name, ref=ref, pipeline_iid=pipeline_iid)
         return jsonify(result)
 
+    @app.route('/api/trigger-actions/history', methods=['DELETE'])
+    def trigger_actions_clear_history_api():
+        """清空所有执行历史记录"""
+        from src.services.trigger_action import clear_trigger_history
+        result = clear_trigger_history()
+        return jsonify(result)
+

@@ -208,6 +208,23 @@ def _calc_md5(filepath):
     return md5.hexdigest()
 
 
+def _kill_process_group(proc):
+    """杀掉子进程及其进程组（兼容 Linux/Windows）"""
+    import signal
+    try:
+        if sys.platform != 'win32':
+            os.killpg(os.getpgid(proc.pid), signal.SIGKILL)
+        else:
+            # Windows: taskkill /T 杀进程树
+            subprocess.run(['taskkill', '/F', '/T', '/PID', str(proc.pid)],
+                           capture_output=True, timeout=5)
+    except Exception:
+        try:
+            proc.kill()
+        except Exception:
+            pass
+
+
 def _execute_local(action, path_with_namespace, ref, project_name, pipeline_iid=None, trigger_source='auto', start_time=None):
     import subprocess
     if start_time is None:
@@ -258,34 +275,51 @@ def _execute_local(action, path_with_namespace, ref, project_name, pipeline_iid=
             cmd = [sys.executable, script_path]
         else:
             cmd = ['bash', script_path]
-        result = subprocess.run(
-            cmd,
-            env=env,
-            capture_output=True,
-            text=True,
-            timeout=timeout
-        )
-        success = result.returncode == 0
-        output = result.stdout
-        error_output = result.stderr
 
-        if success:
-            logger.info(f"trigger_action | local_result | action={name}, script={script_name}, exit_code={result.returncode}")
+        # 使用 Popen 而非 subprocess.run：
+        # POSIX 上 subprocess.run 超时后只 wait()，不填充 exc.output/exc.stderr
+        # 改用 Popen + communicate(timeout=...)，超时后 kill 进程组再 communicate 取输出
+        popen_kwargs = {
+            'env': env,
+            'stdout': subprocess.PIPE,
+            'stderr': subprocess.PIPE,
+            'text': True,
+        }
+        # Linux 用 os.setsid 创建进程组，便于 kill 整组（docker pull 可能有子进程）
+        # Windows 用 CREATE_NEW_PROCESS_GROUP
+        if sys.platform != 'win32':
+            popen_kwargs['preexec_fn'] = os.setsid
         else:
-            logger.error(f"trigger_action | local_result | action={name}, script={script_name}, exit_code={result.returncode}, stderr_len={len(error_output.strip())}, stdout_tail={(output or '').strip()[-500:]!r}")
+            popen_kwargs['creationflags'] = subprocess.CREATE_NEW_PROCESS_GROUP
 
-        _notify_result(name, project_name, ref, success, output, error_output, result.returncode, 'local', variables, trigger_source, pipeline_iid, start_time)
-    except subprocess.TimeoutExpired as e:
-        # 提取超时前已捕获的部分输出，便于定位卡在哪一步
-        partial_out = (e.output or '').strip()[-500:] if e.output else ''
-        partial_err = (e.stderr or '').strip()[-500:] if e.stderr else ''
-        logger.error(f"trigger_action | local_result | action={name}, script={script_name}, result=timeout, timeout={timeout}s, stdout_tail={partial_out!r}, stderr_tail={partial_err!r}")
-        error_msg = f'本地执行超时({timeout}s)'
-        if partial_err:
-            error_msg = f'{error_msg}\nstderr_tail: {partial_err}'
-        if partial_out:
-            error_msg = f'{error_msg}\nstdout_tail: {partial_out}'
-        _notify_result(name, project_name, ref, False, partial_out, error_msg, None, 'local', variables, trigger_source, pipeline_iid, start_time)
+        proc = subprocess.Popen(cmd, **popen_kwargs)
+        try:
+            output, error_output = proc.communicate(timeout=timeout)
+            success = proc.returncode == 0
+
+            if success:
+                logger.info(f"trigger_action | local_result | action={name}, script={script_name}, exit_code={proc.returncode}")
+            else:
+                logger.error(f"trigger_action | local_result | action={name}, script={script_name}, exit_code={proc.returncode}, stderr_len={len((error_output or '').strip())}, stdout_tail={(output or '').strip()[-500:]!r}")
+
+            _notify_result(name, project_name, ref, success, output, error_output, proc.returncode, 'local', variables, trigger_source, pipeline_iid, start_time)
+        except subprocess.TimeoutExpired:
+            # 超时：kill 整个进程组（避免 docker pull 等子进程残留），再 communicate 取已捕获输出
+            _kill_process_group(proc)
+            try:
+                output, error_output = proc.communicate(timeout=10)
+            except Exception:
+                output, error_output = '', ''
+
+            partial_out = (output or '').strip()[-500:]
+            partial_err = (error_output or '').strip()[-500:]
+            logger.error(f"trigger_action | local_result | action={name}, script={script_name}, result=timeout, timeout={timeout}s, stdout_tail={partial_out!r}, stderr_tail={partial_err!r}")
+            error_msg = f'本地执行超时({timeout}s)'
+            if partial_err:
+                error_msg = f'{error_msg}\nstderr_tail: {partial_err}'
+            if partial_out:
+                error_msg = f'{error_msg}\nstdout_tail: {partial_out}'
+            _notify_result(name, project_name, ref, False, partial_out, error_msg, None, 'local', variables, trigger_source, pipeline_iid, start_time)
     except Exception as e:
         logger.error(f"trigger_action | local_result | action={name}, script={script_name}, result=exception, error={e}")
         _notify_result(name, project_name, ref, False, '', str(e), None, 'local', variables, trigger_source, pipeline_iid, start_time)
@@ -525,6 +559,23 @@ def get_trigger_history(limit=50, offset=0, action_name=None, project_name=None,
                     'has_more': False
                 }
             }
+
+
+def clear_trigger_history():
+    """清空所有执行历史记录（内存缓存 + 数据库）"""
+    try:
+        # 清空内存缓存
+        with _trigger_history_lock:
+            cleared_cache = len(_trigger_history_cache)
+            _trigger_history_cache.clear()
+        # 清空数据库
+        from src.services.database import TriggerActionHistoryDB
+        deleted_db = TriggerActionHistoryDB.clear()
+        logger.info(f"trigger_action | clear_history | cache_cleared={cleared_cache}, db_deleted={deleted_db}")
+        return {'success': True, 'message': f'已清空执行历史（内存 {cleared_cache} 条，数据库 {deleted_db} 条）'}
+    except Exception as e:
+        logger.error(f"trigger_action | clear_history_failed | error={e}")
+        return {'success': False, 'message': f'清空失败: {e}'}
 
 
 def manual_trigger(action_name, ref='', pipeline_iid=None):

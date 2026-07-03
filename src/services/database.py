@@ -714,6 +714,19 @@ class TriggerActionHistoryDB:
             app_logger.error(f"database | get_trigger_history_count_failed | error={e}")
             return 0
 
+    @staticmethod
+    def clear():
+        """清空所有执行历史记录"""
+        try:
+            with get_db_cursor() as cursor:
+                cursor.execute('DELETE FROM trigger_action_history')
+                affected = cursor.rowcount
+            app_logger.info(f"database | clear_trigger_history | deleted_rows={affected}")
+            return affected
+        except Exception as e:
+            app_logger.error(f"database | clear_trigger_history_failed | error={e}")
+            return 0
+
 
 class SentCardDB:
     """已发飞书卡片缓存（方案 2: 替代内存 _sent_cards）"""
