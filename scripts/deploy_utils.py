@@ -794,7 +794,7 @@ def _reconcile_nexus_state(projectcode, current_branch, status):
                     generate_md5_file(image_path)
                     print(f"  对账: {branch} 镜像已保存 {image_name}")
 
-                # 3b. 前端 zip 类：确认 Nexus binary_libs 是否有该分支最新 zip
+                # 3b. 前端 zip 类：下载 zip 并解压到 deploy/nginx/dist
                 elif hasattr(mod, 'search_binary_libs'):
                     # 不传 IID，取该分支最新产物
                     binary = mod.search_binary_libs(nexus_url, nexus_user, nexus_password, branch)
@@ -809,12 +809,9 @@ def _reconcile_nexus_state(projectcode, current_branch, status):
 
                     print(f"  对账: {branch} 找到最新 zip {binary['name']}")
 
-                    # 生成规范化文件名 + 下载
-                    image_name = generate_canonical_image_name(
-                        projectcode, image_type, scan_dir=images_dir
-                    )
-                    target_path = os.path.join(images_dir, image_name)
-
+                    # 下载 zip 到临时文件
+                    import tempfile as _tempfile
+                    tmp_zip = _tempfile.mktemp(prefix='frontend_', suffix='.zip')
                     import requests as _requests
                     session = _requests.Session()
                     session.auth = (nexus_user, nexus_password)
@@ -825,11 +822,31 @@ def _reconcile_nexus_state(projectcode, current_branch, status):
                     if resp.status_code != 200:
                         print(f"  对账: {branch} 下载失败 status={resp.status_code}")
                         continue
-                    with open(target_path, 'wb') as f:
+                    with open(tmp_zip, 'wb') as f:
                         for chunk in resp.iter_content(chunk_size=8 * 1024 * 1024):
                             f.write(chunk)
-                    generate_md5_file(target_path)
-                    print(f"  对账: {branch} zip 已保存 {image_name}")
+
+                    # 解压到 deploy/nginx/dist（清空旧内容后解压）
+                    import shutil as _shutil
+                    import zipfile as _zipfile
+                    deploy_dir = get_workorder_deploy_dir()
+                    dist_dir = os.path.join(deploy_dir, 'nginx', 'dist')
+                    os.makedirs(dist_dir, exist_ok=True)
+                    for item in os.listdir(dist_dir):
+                        item_path = os.path.join(dist_dir, item)
+                        if os.path.isdir(item_path):
+                            _shutil.rmtree(item_path)
+                        else:
+                            os.remove(item_path)
+                    with _zipfile.ZipFile(tmp_zip, 'r') as zf:
+                        zf.extractall(dist_dir)
+                    os.remove(tmp_zip)
+
+                    # 生成规范化文件名（仅用于状态记录，不生成 .image 文件）
+                    image_name = generate_canonical_image_name(
+                        projectcode, image_type, scan_dir=images_dir
+                    )
+                    print(f"  对账: {branch} 前端 zip 已解压到 {dist_dir}")
 
                 else:
                     print(f"  对账跳过: {branch} (脚本 {script_name} 无 search 函数)")
@@ -986,8 +1003,8 @@ def orchestrate_file_deploy(local_file_path, projectcode, image_type, branch, mi
 def _orchestrate_file_deploy_impl(local_file_path, projectcode, image_type, branch, minio_config):
     """统一编排文件类（非 Docker 镜像，如前端 zip）部署流程实现
 
-    与 orchestrate_image_deploy 类似，但跳过 docker save 步骤，直接处理已下载的本地文件。
-    适用于 acre-web 等前端项目（从 Nexus binary_libs 下载 zip 后处理）。
+    FRONTEND 类型处理：下载 zip 后直接解压到 deploy/nginx/dist 目录，
+    替换前端静态资源。不生成 .image 文件，不存入 images 目录。
 
     Args:
         local_file_path: 已下载的本地文件路径（如 zip）
@@ -997,9 +1014,10 @@ def _orchestrate_file_deploy_impl(local_file_path, projectcode, image_type, bran
         minio_config: MinIO 配置 dict
 
     Returns:
-        str: 生成的规范化文件名
+        str: 产物标识（用于状态记录）
     """
     import shutil as _shutil
+    import zipfile as _zipfile
 
     # 0. 确保基准包已从 MinIO 下载并解压到 workorder/deploy/
     _ensure_base_deploy_package(minio_config)
@@ -1010,8 +1028,8 @@ def _orchestrate_file_deploy_impl(local_file_path, projectcode, image_type, bran
 
     # 1.5 首次模式：对账 Nexus 仓库真实产物，补全本地 completed_branches
     # 注意：对账跳过当前分支（由本函数后续步骤处理），因此对账后不能立即
-    # 检查"所有分支完成"并触发首次打包——当前分支产物还未 save。
-    # 首次打包由 report_branch_completed 在当前分支 save 完成后自然触发。
+    # 检查"所有分支完成"并触发首次打包——当前分支产物还未处理。
+    # 首次打包由 report_branch_completed 在当前分支处理完成后自然触发。
     if not first_pack_completed:
         status = _reconcile_nexus_state(projectcode, branch, status)
         save_projectcode_status(projectcode, status, minio_config)
@@ -1019,14 +1037,15 @@ def _orchestrate_file_deploy_impl(local_file_path, projectcode, image_type, bran
     # 1.6 如果当前分支已在对账完成的列表中，验证产物文件存在性
     if branch in status.get('completed_branches', []):
         cached_image = _get_branch_image_name(status.get('branch_images', {}), branch)
-        # 首次模式：检查本地 deploy/images/ 是否有对应产物文件
+        # 首次模式：检查本地 deploy/nginx/dist 是否已有产物
         if not first_pack_completed and cached_image:
-            cached_path = os.path.join(get_workorder_images_dir(), cached_image)
-            if os.path.exists(cached_path) and os.path.exists(cached_path + '.md5'):
+            deploy_dir = get_workorder_deploy_dir()
+            dist_dir = os.path.join(deploy_dir, 'nginx', 'dist')
+            if os.path.isdir(dist_dir) and os.listdir(dist_dir):
                 print(f"  当前分支 {branch} 已对账完成且产物存在，跳过下载")
                 return cached_image
             print(f"  当前分支 {branch} 已标记完成但产物缺失，重新生成")
-            # 从 completed_branches 中移除，让后续步骤重新 save
+            # 从 completed_branches 中移除，让后续步骤重新处理
             status['completed_branches'] = [b for b in status.get('completed_branches', []) if b != branch]
         elif not cached_image:
             # 已标记完成但无产物文件名记录，需要重新生成
@@ -1044,49 +1063,68 @@ def _orchestrate_file_deploy_impl(local_file_path, projectcode, image_type, bran
     )
     bucket = minio_config.get('bucket', 'workorder')
 
-    # 2. 生成规范化文件名
+    # 2. 生成规范化文件名（用于状态记录，实际不生成 .image 文件）
     if first_pack_completed:
-        # 增量模式：扫描 MinIO 的 projectcode/images/ 路径
         image_name = generate_canonical_image_name(
             projectcode, image_type,
             minio_client=minio_client,
             minio_bucket=bucket,
         )
-        target_dir = None  # 增量模式直接上传 MinIO
     else:
-        # 首次模式：扫描本地 workorder/deploy/images/
         images_dir = get_workorder_images_dir()
         image_name = generate_canonical_image_name(projectcode, image_type, scan_dir=images_dir)
-        target_dir = images_dir
 
-    # 3. 复制/移动文件到目标位置
-    if target_dir:
-        # 首次模式：移动到 workorder/deploy/images/
-        target_path = os.path.join(target_dir, image_name)
-        _shutil.move(local_file_path, target_path)
-    else:
-        # 增量模式：使用临时路径
-        target_path = local_file_path
+    # 3. 解压 zip 到 deploy/nginx/dist 目录（替换前端静态资源）
+    deploy_dir = get_workorder_deploy_dir()
+    dist_dir = os.path.join(deploy_dir, 'nginx', 'dist')
+    os.makedirs(dist_dir, exist_ok=True)
 
-    # 4. 生成 MD5 文件
-    md5_path = generate_md5_file(target_path)
+    # 清空旧 dist 内容
+    if os.path.isdir(dist_dir):
+        for item in os.listdir(dist_dir):
+            item_path = os.path.join(dist_dir, item)
+            if os.path.isdir(item_path):
+                _shutil.rmtree(item_path)
+            else:
+                os.remove(item_path)
+        print(f"  已清空 dist 目录: {dist_dir}")
 
-    # 5. 根据模式处理
+    # 解压 zip
+    with _zipfile.ZipFile(local_file_path, 'r') as zf:
+        zf.extractall(dist_dir)
+    print(f"  前端 zip 已解压到: {dist_dir}")
+
+    # 4. 根据模式处理
     if first_pack_completed:
-        # 增量模式：直接上传到 MinIO {projectcode}/images/
-        upload_to_minio(minio_client, bucket, target_path, f"{projectcode}/images/{image_name}")
-        upload_to_minio(minio_client, bucket, md5_path, f"{projectcode}/images/{image_name}.md5")
+        # 增量模式：重新打包 deploy.zip 上传 MinIO
+        local_zip = os.path.join(deploy_dir, '..', 'deploy.zip')
+        print(f"  增量打包: {deploy_dir} -> {local_zip}")
+        with _zipfile.ZipFile(local_zip, 'w', _zipfile.ZIP_DEFLATED) as zf:
+            for root, dirs, files in os.walk(deploy_dir):
+                for filename in files:
+                    file_path = os.path.join(root, filename)
+                    arcname = os.path.relpath(file_path, deploy_dir)
+                    zf.write(file_path, arcname)
+        md5_path = generate_md5_file(local_zip)
+        upload_to_minio(minio_client, bucket, local_zip, f"{projectcode}/deploy.zip")
+        upload_to_minio(minio_client, bucket, md5_path, f"{projectcode}/deploy.zip.md5")
         # 更新状态
-        report_branch_completed(projectcode, branch, image_name, minio_config)
+        report_branch_completed(projectcode, branch, image_name, minio_config, image_full='')
         # 清理临时文件
         try:
-            os.remove(target_path)
+            os.remove(local_zip)
             os.remove(md5_path)
         except OSError:
             pass
     else:
-        # 首次模式：文件已在 workorder/deploy/images/，更新状态并检查是否触发打包
-        report_branch_completed(projectcode, branch, image_name, minio_config)
+        # 首次模式：文件已解压到 deploy/nginx/dist，更新状态并检查是否触发打包
+        report_branch_completed(projectcode, branch, image_name, minio_config, image_full='')
+
+    # 清理下载的 zip 文件
+    try:
+        os.remove(local_file_path)
+    except OSError:
+        pass
 
     return image_name
 

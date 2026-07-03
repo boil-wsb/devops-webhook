@@ -1206,7 +1206,8 @@
             <div class="form-group">
                 <label for="triggerRef">分支名 (ref)<span class="required">*</span></label>
                 <input type="text" id="triggerRef" class="form-input" placeholder="例如：dev-bulk、main" autocomplete="off">
-                <div class="form-hint">必填，将作为 REF 环境变量传入脚本</div>
+                <div id="triggerRefOptions" style="margin-top: var(--space-2); display: flex; flex-wrap: wrap; gap: 6px;"></div>
+                <div class="form-hint">必填，将作为 REF 环境变量传入脚本。点击下方标签快速选择，或手动输入。</div>
             </div>
             <div class="form-group">
                 <label for="triggerIid">Pipeline IID<span class="optional">(可选)</span></label>
@@ -1720,13 +1721,41 @@
             document.getElementById('triggerRef').value = '';
             document.getElementById('triggerIid').value = '';
 
-            // 预填默认分支（取第一个 ref_pattern）
+            // 收集可选分支：优先 ref_projectcodes 的 keys，合并 ref_patterns
+            const refProjectcodes = action.ref_projectcodes || {};
             const refPatterns = action.ref_patterns || [];
             const refPattern = action.ref_pattern || '';
-            if (refPatterns.length) {
-                document.getElementById('triggerRef').value = refPatterns[0];
-            } else if (refPattern) {
-                document.getElementById('triggerRef').value = refPattern;
+            const branchSet = new Set();
+            Object.keys(refProjectcodes).forEach(b => branchSet.add(b));
+            refPatterns.forEach(b => branchSet.add(b));
+            if (refPattern) branchSet.add(refPattern);
+            const branches = Array.from(branchSet);
+
+            // 渲染分支选项标签
+            const optionsContainer = document.getElementById('triggerRefOptions');
+            optionsContainer.innerHTML = '';
+            if (branches.length) {
+                branches.forEach(b => {
+                    const tag = document.createElement('span');
+                    tag.className = 'ref-tag';
+                    tag.style.cursor = 'pointer';
+                    tag.textContent = b;
+                    tag.onclick = function() {
+                        document.getElementById('triggerRef').value = b;
+                        // 高亮选中
+                        optionsContainer.querySelectorAll('.ref-tag').forEach(t => t.style.borderColor = '');
+                        tag.style.borderColor = 'var(--primary-500)';
+                    };
+                    optionsContainer.appendChild(tag);
+                });
+            }
+
+            // 预填默认分支（取第一个）
+            if (branches.length) {
+                document.getElementById('triggerRef').value = branches[0];
+                // 高亮第一个
+                const firstTag = optionsContainer.querySelector('.ref-tag');
+                if (firstTag) firstTag.style.borderColor = 'var(--primary-500)';
             }
 
             const modal = document.getElementById('triggerModal');
