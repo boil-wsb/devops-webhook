@@ -639,10 +639,15 @@ _projectcode_locks_guard = threading.Lock()
 
 
 def _get_projectcode_lock(projectcode):
-    """获取 projectcode 级别的锁（惰性创建）"""
+    """获取 projectcode 级别的锁（惰性创建）
+
+    使用 RLock（可重入锁）：orchestrate_image_deploy 持有锁后会调用
+    report_branch_completed → pack_and_upload_deploy，后者会再次获取
+    同一把锁。Lock() 不可重入会导致死锁，必须用 RLock。
+    """
     with _projectcode_locks_guard:
         if projectcode not in _projectcode_locks:
-            _projectcode_locks[projectcode] = threading.Lock()
+            _projectcode_locks[projectcode] = threading.RLock()
         return _projectcode_locks[projectcode]
 
 
