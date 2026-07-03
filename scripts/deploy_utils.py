@@ -245,23 +245,31 @@ def ensure_dependencies(required_commands):
         sys.exit(1)
 
 
-def run_cmd(cmd, check=True, **kwargs):
+def run_cmd(cmd, check=True, timeout=600, **kwargs):
     """运行子进程命令，带友好的错误处理
     
     Args:
         cmd: 命令列表
         check: 是否检查返回码
+        timeout: 超时秒数（默认 600s），避免 docker 命令无限挂起
         **kwargs: 传递给 subprocess.run 的其他参数
     
     Returns:
         subprocess.CompletedProcess
     """
     try:
-        print(f"  执行: {' '.join(cmd)}")
-        result = subprocess.run(cmd, check=check, capture_output=True, text=True, **kwargs)
+        print(f"  执行: {' '.join(cmd)} (timeout={timeout}s)")
+        result = subprocess.run(cmd, check=check, capture_output=True, text=True, timeout=timeout, **kwargs)
         if result.stdout:
             print(f"  输出: {result.stdout.strip()[:500]}")
         return result
+    except subprocess.TimeoutExpired as e:
+        print(f"ERROR: 命令超时 ({timeout}s): {' '.join(cmd)}", file=sys.stderr)
+        if e.stdout:
+            print(f"STDOUT: {str(e.stdout)[:500]}", file=sys.stderr)
+        if e.stderr:
+            print(f"STDERR: {str(e.stderr)[:500]}", file=sys.stderr)
+        raise
     except subprocess.CalledProcessError as e:
         print(f"ERROR: 命令执行失败 (exit code {e.returncode})", file=sys.stderr)
         if e.stdout:

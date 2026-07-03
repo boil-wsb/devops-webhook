@@ -259,6 +259,9 @@ def _execute_local(action, path_with_namespace, ref, project_name, pipeline_iid=
     env['REF'] = _strip_ref_prefix(ref)
     if pipeline_iid is not None:
         env['PIPELINE_IID'] = str(pipeline_iid)
+    # 强制 Python 子进程无缓冲输出，否则 print 会累积在缓冲区
+    # 进程被 kill 时缓冲区丢失，导致看不到脚本内部日志
+    env['PYTHONUNBUFFERED'] = '1'
 
     # 注入 projectcode 与 image_type（从 ref_projectcodes 与 image_type 解析）
     clean_ref = _strip_ref_prefix(ref)
