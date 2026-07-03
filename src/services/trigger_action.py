@@ -292,18 +292,34 @@ def _execute_local(action, path_with_namespace, ref, project_name, pipeline_iid=
         else:
             popen_kwargs['creationflags'] = subprocess.CREATE_NEW_PROCESS_GROUP
 
+        logger.info(f"trigger_action | local_start | action={name}, script={script_name}, cmd={' '.join(cmd)}, timeout={timeout}s, projectcode={env.get('PROJECTCODE', '-')}, image_type={env.get('IMAGE_TYPE', '-')}, pipeline_iid={env.get('PIPELINE_IID', '-')}")
+
         proc = subprocess.Popen(cmd, **popen_kwargs)
+        logger.info(f"trigger_action | local_started | action={name}, pid={proc.pid}")
+
+        # 心跳线程：每 60s 记录一次"仍在运行"，便于排查长时间无输出是卡住还是正常
+        heartbeat_stop = threading.Event()
+        def _heartbeat():
+            while not heartbeat_stop.wait(60):
+                elapsed = int((datetime.now() - start_time).total_seconds())
+                logger.info(f"trigger_action | local_running | action={name}, pid={proc.pid}, elapsed={elapsed}s")
+        hb_thread = threading.Thread(target=_heartbeat, daemon=True)
+        hb_thread.start()
+
         try:
             output, error_output = proc.communicate(timeout=timeout)
+            heartbeat_stop.set()
+            elapsed = round((datetime.now() - start_time).total_seconds(), 1)
             success = proc.returncode == 0
 
             if success:
-                logger.info(f"trigger_action | local_result | action={name}, script={script_name}, exit_code={proc.returncode}")
+                logger.info(f"trigger_action | local_result | action={name}, script={script_name}, exit_code={proc.returncode}, elapsed={elapsed}s, stdout_len={len((output or '').strip())}, stderr_len={len((error_output or '').strip())}")
             else:
-                logger.error(f"trigger_action | local_result | action={name}, script={script_name}, exit_code={proc.returncode}, stderr_len={len((error_output or '').strip())}, stdout_tail={(output or '').strip()[-500:]!r}")
+                logger.error(f"trigger_action | local_result | action={name}, script={script_name}, exit_code={proc.returncode}, elapsed={elapsed}s, stderr_len={len((error_output or '').strip())}, stdout_tail={(output or '').strip()[-500:]!r}")
 
             _notify_result(name, project_name, ref, success, output, error_output, proc.returncode, 'local', variables, trigger_source, pipeline_iid, start_time)
         except subprocess.TimeoutExpired:
+            heartbeat_stop.set()
             # 超时：kill 整个进程组（避免 docker pull 等子进程残留），再 communicate 取已捕获输出
             _kill_process_group(proc)
             try:
@@ -379,21 +395,36 @@ def _execute_ssh(action, path_with_namespace, ref, project_name, pipeline_iid=No
         else:
             command = f"{env_prefix} bash -c {_shell_quote(ssh_command)}"
 
+        logger.info(f"trigger_action | ssh_start | action={name}, host={host}:{port}, script={script_name or ssh_command}, timeout={timeout}s")
+
         stdin, stdout, stderr = client.exec_command(command, timeout=timeout)
+
+        # 心跳线程：SSH 执行期间记录"仍在运行"
+        heartbeat_stop = threading.Event()
+        def _ssh_heartbeat():
+            while not heartbeat_stop.wait(60):
+                elapsed = int((datetime.now() - start_time).total_seconds())
+                logger.info(f"trigger_action | ssh_running | action={name}, host={host}, elapsed={elapsed}s")
+        hb_thread = threading.Thread(target=_ssh_heartbeat, daemon=True)
+        hb_thread.start()
+
         exit_code = stdout.channel.recv_exit_status()
+        heartbeat_stop.set()
         output = stdout.read().decode('utf-8', errors='replace')
         error_output = stderr.read().decode('utf-8', errors='replace')
 
+        elapsed = round((datetime.now() - start_time).total_seconds(), 1)
         success = exit_code == 0
         if success:
-            logger.info(f"trigger_action | ssh_result | action={name}, host={host}, script={script_name or ssh_command}, exit_code={exit_code}")
+            logger.info(f"trigger_action | ssh_result | action={name}, host={host}, script={script_name or ssh_command}, exit_code={exit_code}, elapsed={elapsed}s")
         else:
-            logger.error(f"trigger_action | ssh_result | action={name}, host={host}, script={script_name or ssh_command}, exit_code={exit_code}, stderr_len={len(error_output.strip())}, stdout_tail={(output or '').strip()[-500:]!r}")
+            logger.error(f"trigger_action | ssh_result | action={name}, host={host}, script={script_name or ssh_command}, exit_code={exit_code}, elapsed={elapsed}s, stderr_len={len(error_output.strip())}, stdout_tail={(output or '').strip()[-500:]!r}")
             if script_name:
                 client.exec_command(f"rm -f {remote_script}")
 
         _notify_result(name, project_name, ref, success, output, error_output, exit_code, host, variables, trigger_source, pipeline_iid, start_time)
     except socket.timeout:
+        heartbeat_stop.set()
         # 远程执行超时（channel 无数据流动超过 timeout 秒）
         logger.error(f"trigger_action | ssh_result | action={name}, host={host}, script={script_name or ssh_command}, result=timeout, timeout={timeout}s")
         if script_name:
@@ -416,13 +447,17 @@ def _execute_ssh(action, path_with_namespace, ref, project_name, pipeline_iid=No
 
 
 def _notify_result(action_name, project_name, ref, success, output='', error_output='', exit_code=None, ssh_host='', variables=None, trigger_source='auto', pipeline_iid=None, start_time=None):
+    elapsed = round((datetime.now() - start_time).total_seconds(), 1) if start_time else 0
+    location = ssh_host or 'local'
+    logger.info(f"trigger_action | notify_start | action={action_name}, success={success}, exit_code={exit_code}, location={location}, elapsed={elapsed}s")
     # 记录执行历史（持久化到数据库 + 内存缓存）
     _record_history(action_name, project_name, ref, success, output, error_output, exit_code, ssh_host, trigger_source, pipeline_iid, start_time)
     try:
         from src.services.feishu_notify import send_action_result
         send_action_result(action_name, project_name, ref, success, output, error_output, exit_code, ssh_host, variables)
+        logger.info(f"trigger_action | notify_done | action={action_name}, success={success}, location={location}")
     except Exception as e:
-        logger.error(f"trigger_action | notify_failed | error={e}")
+        logger.error(f"trigger_action | notify_failed | action={action_name}, error={e}")
 
 
 def _record_history(action_name, project_name, ref, success, output, error_output, exit_code, ssh_host, trigger_source, pipeline_iid, start_time):
@@ -460,7 +495,8 @@ def _record_history(action_name, project_name, ref, success, output, error_outpu
         _trigger_history_cache.insert(0, record)
         if len(_trigger_history_cache) > _TRIGGER_HISTORY_CACHE_MAX:
             _trigger_history_cache.pop()
-    
+    logger.info(f"trigger_action | history_cached | action={action_name}, success={success}, cache_size={len(_trigger_history_cache)}")
+
     # 异步写入数据库（不阻塞通知流程）
     def _db_write():
         try:
@@ -480,8 +516,9 @@ def _record_history(action_name, project_name, ref, success, output, error_outpu
                 ssh_host=ssh_host or 'local',
                 trigger_source=trigger_source,
             )
+            logger.info(f"trigger_action | history_db_written | action={action_name}, success={success}, duration={round(duration, 1)}s")
         except Exception as e:
-            logger.error(f"trigger_action | db_record_failed | error={e}")
+            logger.error(f"trigger_action | db_record_failed | action={action_name}, error={e}")
     
     db_thread = threading.Thread(target=_db_write, daemon=True)
     db_thread.start()
