@@ -297,45 +297,78 @@ def _execute_local(action, path_with_namespace, ref, project_name, pipeline_iid=
         proc = subprocess.Popen(cmd, **popen_kwargs)
         logger.info(f"trigger_action | local_started | action={name}, pid={proc.pid}")
 
-        # 心跳线程：每 60s 记录一次"仍在运行"，便于排查长时间无输出是卡住还是正常
-        heartbeat_stop = threading.Event()
-        def _heartbeat():
-            while not heartbeat_stop.wait(60):
-                elapsed = int((datetime.now() - start_time).total_seconds())
-                logger.info(f"trigger_action | local_running | action={name}, pid={proc.pid}, elapsed={elapsed}s")
-        hb_thread = threading.Thread(target=_heartbeat, daemon=True)
-        hb_thread.start()
+        # 实时逐行读取 stdout/stderr：
+        # communicate() 会缓冲所有输出直到进程结束，脚本内部 print 在进程结束前读不到
+        # 改为两个线程分别逐行读取，每行立即打印到 logger，能实时看到脚本内部进度
+        import time
+        output_lines = []
+        error_lines = []
 
-        try:
-            output, error_output = proc.communicate(timeout=timeout)
-            heartbeat_stop.set()
-            elapsed = round((datetime.now() - start_time).total_seconds(), 1)
-            success = proc.returncode == 0
-
-            if success:
-                logger.info(f"trigger_action | local_result | action={name}, script={script_name}, exit_code={proc.returncode}, elapsed={elapsed}s, stdout_len={len((output or '').strip())}, stderr_len={len((error_output or '').strip())}")
-            else:
-                logger.error(f"trigger_action | local_result | action={name}, script={script_name}, exit_code={proc.returncode}, elapsed={elapsed}s, stderr_len={len((error_output or '').strip())}, stdout_tail={(output or '').strip()[-500:]!r}")
-
-            _notify_result(name, project_name, ref, success, output, error_output, proc.returncode, 'local', variables, trigger_source, pipeline_iid, start_time)
-        except subprocess.TimeoutExpired:
-            heartbeat_stop.set()
-            # 超时：kill 整个进程组（避免 docker pull 等子进程残留），再 communicate 取已捕获输出
-            _kill_process_group(proc)
+        def _read_stream(stream, buffer, stream_name):
             try:
-                output, error_output = proc.communicate(timeout=10)
+                for line in iter(stream.readline, ''):
+                    line = line.rstrip('\n\r')
+                    if line:
+                        buffer.append(line)
+                        logger.info(f"trigger_action | local_{stream_name} | action={name}, pid={proc.pid}, line={line[:500]}")
             except Exception:
-                output, error_output = '', ''
+                pass
+            finally:
+                try:
+                    stream.close()
+                except Exception:
+                    pass
 
+        stdout_thread = threading.Thread(target=_read_stream, args=(proc.stdout, output_lines, 'stdout'), daemon=True)
+        stderr_thread = threading.Thread(target=_read_stream, args=(proc.stderr, error_lines, 'stderr'), daemon=True)
+        stdout_thread.start()
+        stderr_thread.start()
+
+        # 主线程轮询进程状态，每 60s 打印心跳
+        HEARTBEAT_INTERVAL = 60
+        last_heartbeat = time.monotonic()
+        timed_out = False
+
+        while True:
+            ret = proc.poll()
+            if ret is not None:
+                break
+            elapsed = (datetime.now() - start_time).total_seconds()
+            if elapsed >= timeout:
+                _kill_process_group(proc)
+                timed_out = True
+                break
+            now = time.monotonic()
+            if now - last_heartbeat >= HEARTBEAT_INTERVAL:
+                logger.info(f"trigger_action | local_running | action={name}, pid={proc.pid}, elapsed={int(elapsed)}s")
+                last_heartbeat = now
+            time.sleep(1)
+
+        # 等待读取线程结束（进程已结束，readline 会很快返回）
+        stdout_thread.join(timeout=5)
+        stderr_thread.join(timeout=5)
+
+        output = '\n'.join(output_lines)
+        error_output = '\n'.join(error_lines)
+        elapsed = round((datetime.now() - start_time).total_seconds(), 1)
+
+        if timed_out:
             partial_out = (output or '').strip()[-500:]
             partial_err = (error_output or '').strip()[-500:]
-            logger.error(f"trigger_action | local_result | action={name}, script={script_name}, result=timeout, timeout={timeout}s, stdout_tail={partial_out!r}, stderr_tail={partial_err!r}")
+            logger.error(f"trigger_action | local_result | action={name}, script={script_name}, result=timeout, timeout={timeout}s, elapsed={elapsed}s, stdout_tail={partial_out!r}, stderr_tail={partial_err!r}")
             error_msg = f'本地执行超时({timeout}s)'
             if partial_err:
                 error_msg = f'{error_msg}\nstderr_tail: {partial_err}'
             if partial_out:
                 error_msg = f'{error_msg}\nstdout_tail: {partial_out}'
             _notify_result(name, project_name, ref, False, partial_out, error_msg, None, 'local', variables, trigger_source, pipeline_iid, start_time)
+        else:
+            success = proc.returncode == 0
+            if success:
+                logger.info(f"trigger_action | local_result | action={name}, script={script_name}, exit_code={proc.returncode}, elapsed={elapsed}s, stdout_len={len(output.strip())}, stderr_len={len(error_output.strip())}")
+            else:
+                logger.error(f"trigger_action | local_result | action={name}, script={script_name}, exit_code={proc.returncode}, elapsed={elapsed}s, stderr_len={len(error_output.strip())}, stdout_tail={output.strip()[-500:]!r}")
+            _notify_result(name, project_name, ref, success, output, error_output, proc.returncode, 'local', variables, trigger_source, pipeline_iid, start_time)
     except Exception as e:
         logger.error(f"trigger_action | local_result | action={name}, script={script_name}, result=exception, error={e}")
         _notify_result(name, project_name, ref, False, '', str(e), None, 'local', variables, trigger_source, pipeline_iid, start_time)
