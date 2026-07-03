@@ -597,14 +597,37 @@ def collect_expected_branches(projectcode):
         return []
 
 
-def report_branch_completed(projectcode, branch, image_name, minio_config=None):
+def _get_branch_image_name(branch_images, branch):
+    """从 branch_images 中提取镜像文件名，兼容新旧格式
+
+    新格式: {branch: {'image_name': str, 'image_full': str}}
+    旧格式: {branch: 'filename.image'}
+
+    Args:
+        branch_images: status['branch_images'] dict
+        branch: 分支名
+
+    Returns:
+        str: 镜像文件名，不存在则返回 ''
+    """
+    val = branch_images.get(branch)
+    if val is None:
+        return ''
+    if isinstance(val, dict):
+        return val.get('image_name', '')
+    return val  # 旧格式直接是字符串
+
+
+def report_branch_completed(projectcode, branch, image_name, minio_config=None, image_full=None):
     """上报分支完成状态，并检查是否触发首次打包
 
     Args:
         projectcode: 项目代码
         branch: 完成的分支名
-        image_name: 生成的规范化镜像文件名
+        image_name: 生成的规范化镜像文件名（docker save 产物，如 JE250058-WCS-20260703-01.image）
         minio_config: MinIO 配置
+        image_full: 原始镜像地址（如 192.168.100.213:8083/app/wcs:dev-1.0.250509-shenhuo），
+                    用于更新 docker-compose.yml 的 image 字段。前端 zip 类无此值则为 None。
 
     Returns:
         bool: 是否触发了首次打包
@@ -613,10 +636,13 @@ def report_branch_completed(projectcode, branch, image_name, minio_config=None):
 
     if branch not in status['completed_branches']:
         status['completed_branches'].append(branch)
-        # 记录分支与镜像名的映射
+        # 记录分支与镜像信息的映射（image_name=产物文件名, image_full=原始镜像地址）
         if 'branch_images' not in status:
             status['branch_images'] = {}
-        status['branch_images'][branch] = image_name
+        status['branch_images'][branch] = {
+            'image_name': image_name,
+            'image_full': image_full or '',
+        }
 
     save_projectcode_status(projectcode, status, minio_config)
 
@@ -711,7 +737,7 @@ def _reconcile_nexus_state(projectcode, current_branch, status):
                 continue
             # 跳过已完成分支（但需验证对应产物文件实际存在，否则重新下载）
             if branch in existing_completed:
-                cached_image = status.get('branch_images', {}).get(branch, '')
+                cached_image = _get_branch_image_name(status.get('branch_images', {}), branch)
                 if cached_image:
                     cached_path = os.path.join(images_dir, cached_image)
                     if os.path.exists(cached_path) and os.path.exists(cached_path + '.md5'):
@@ -743,6 +769,8 @@ def _reconcile_nexus_state(projectcode, current_branch, status):
                 spec = importlib.util.spec_from_file_location(mod_name, script_path)
                 mod = importlib.util.module_from_spec(spec)
                 spec.loader.exec_module(mod)
+
+                image_full = ''  # docker 镜像类会赋值，zip 类保持空
 
                 # 3a. Docker 镜像类：确认 Nexus docker-hosted 是否有该分支最新镜像
                 if hasattr(mod, 'search_docker_image'):
@@ -812,7 +840,10 @@ def _reconcile_nexus_state(projectcode, current_branch, status):
                     status['completed_branches'].append(branch)
                 if 'branch_images' not in status:
                     status['branch_images'] = {}
-                status['branch_images'][branch] = image_name
+                status['branch_images'][branch] = {
+                    'image_name': image_name,
+                    'image_full': image_full,
+                }
 
             except Exception as e:
                 print(f"  对账查询失败: {branch}, error={e}")
@@ -856,23 +887,16 @@ def _orchestrate_image_deploy_impl(image_full, projectcode, image_type, branch, 
     first_pack_completed = status.get('first_pack_completed', False)
 
     # 1.5 首次模式：对账 Nexus 仓库真实产物，补全本地 completed_branches
+    # 注意：对账跳过当前分支（由本函数后续步骤处理），因此对账后不能立即
+    # 检查"所有分支完成"并触发首次打包——当前分支产物还未 save。
+    # 首次打包由 report_branch_completed 在当前分支 save 完成后自然触发。
     if not first_pack_completed:
         status = _reconcile_nexus_state(projectcode, branch, status)
         save_projectcode_status(projectcode, status, minio_config)
 
-        # 对账后立即检查是否已满足打包条件（无需下载当前分支）
-        expected = set(status['expected_branches'])
-        completed = set(status['completed_branches'])
-        if expected and expected.issubset(completed) and not status['first_pack_completed']:
-            print(f"  对账后所有分支已完成，直接触发首次打包")
-            pack_and_upload_deploy(projectcode, minio_config)
-            # 打包后重新加载状态，切换为增量模式
-            status = load_projectcode_status(projectcode, minio_config)
-            first_pack_completed = status.get('first_pack_completed', False)
-
     # 1.6 如果当前分支已在对账完成的列表中，验证产物文件存在性
     if branch in status.get('completed_branches', []):
-        cached_image = status.get('branch_images', {}).get(branch, '')
+        cached_image = _get_branch_image_name(status.get('branch_images', {}), branch)
         # 首次模式：检查本地 deploy/images/ 是否有对应产物文件
         if not first_pack_completed and cached_image:
             cached_path = os.path.join(get_workorder_images_dir(), cached_image)
@@ -880,7 +904,14 @@ def _orchestrate_image_deploy_impl(image_full, projectcode, image_type, branch, 
                 print(f"  当前分支 {branch} 已对账完成且产物存在，跳过下载")
                 return cached_image
             print(f"  当前分支 {branch} 已标记完成但产物缺失，重新生成")
+            # 从 completed_branches 中移除，让后续步骤重新 save
+            status['completed_branches'] = [b for b in status.get('completed_branches', []) if b != branch]
+        elif not cached_image:
+            # 已标记完成但无产物文件名记录，需要重新生成
+            print(f"  当前分支 {branch} 已标记完成但无产物记录，重新生成")
+            status['completed_branches'] = [b for b in status.get('completed_branches', []) if b != branch]
         else:
+            # 增量模式且已有产物记录
             print(f"  当前分支 {branch} 已标记完成，跳过下载")
             return cached_image
 
@@ -931,7 +962,7 @@ def _orchestrate_image_deploy_impl(image_full, projectcode, image_type, branch, 
         upload_to_minio(minio_client, bucket, image_path, f"{projectcode}/images/{image_name}")
         upload_to_minio(minio_client, bucket, md5_path, f"{projectcode}/images/{image_name}.md5")
         # 更新状态
-        report_branch_completed(projectcode, branch, image_name, minio_config)
+        report_branch_completed(projectcode, branch, image_name, minio_config, image_full=image_full)
         # 清理临时文件
         try:
             os.remove(image_path)
@@ -941,7 +972,7 @@ def _orchestrate_image_deploy_impl(image_full, projectcode, image_type, branch, 
             pass
     else:
         # 首次模式：文件已保存在 workorder/deploy/images/，更新状态并检查是否触发打包
-        report_branch_completed(projectcode, branch, image_name, minio_config)
+        report_branch_completed(projectcode, branch, image_name, minio_config, image_full=image_full)
 
     return image_name
 
@@ -978,23 +1009,16 @@ def _orchestrate_file_deploy_impl(local_file_path, projectcode, image_type, bran
     first_pack_completed = status.get('first_pack_completed', False)
 
     # 1.5 首次模式：对账 Nexus 仓库真实产物，补全本地 completed_branches
+    # 注意：对账跳过当前分支（由本函数后续步骤处理），因此对账后不能立即
+    # 检查"所有分支完成"并触发首次打包——当前分支产物还未 save。
+    # 首次打包由 report_branch_completed 在当前分支 save 完成后自然触发。
     if not first_pack_completed:
         status = _reconcile_nexus_state(projectcode, branch, status)
         save_projectcode_status(projectcode, status, minio_config)
 
-        # 对账后立即检查是否已满足打包条件（无需下载当前分支）
-        expected = set(status['expected_branches'])
-        completed = set(status['completed_branches'])
-        if expected and expected.issubset(completed) and not status['first_pack_completed']:
-            print(f"  对账后所有分支已完成，直接触发首次打包")
-            pack_and_upload_deploy(projectcode, minio_config)
-            # 打包后重新加载状态，切换为增量模式
-            status = load_projectcode_status(projectcode, minio_config)
-            first_pack_completed = status.get('first_pack_completed', False)
-
     # 1.6 如果当前分支已在对账完成的列表中，验证产物文件存在性
     if branch in status.get('completed_branches', []):
-        cached_image = status.get('branch_images', {}).get(branch, '')
+        cached_image = _get_branch_image_name(status.get('branch_images', {}), branch)
         # 首次模式：检查本地 deploy/images/ 是否有对应产物文件
         if not first_pack_completed and cached_image:
             cached_path = os.path.join(get_workorder_images_dir(), cached_image)
@@ -1002,7 +1026,14 @@ def _orchestrate_file_deploy_impl(local_file_path, projectcode, image_type, bran
                 print(f"  当前分支 {branch} 已对账完成且产物存在，跳过下载")
                 return cached_image
             print(f"  当前分支 {branch} 已标记完成但产物缺失，重新生成")
+            # 从 completed_branches 中移除，让后续步骤重新 save
+            status['completed_branches'] = [b for b in status.get('completed_branches', []) if b != branch]
+        elif not cached_image:
+            # 已标记完成但无产物文件名记录，需要重新生成
+            print(f"  当前分支 {branch} 已标记完成但无产物记录，重新生成")
+            status['completed_branches'] = [b for b in status.get('completed_branches', []) if b != branch]
         else:
+            # 增量模式且已有产物记录
             print(f"  当前分支 {branch} 已标记完成，跳过下载")
             return cached_image
 
@@ -1121,7 +1152,9 @@ def pack_and_upload_deploy(projectcode, minio_config):
 def _update_compose_for_projectcode(compose_path, projectcode, status):
     """更新 docker-compose.yml 中所有 projectcode 相关服务的 image 字段
 
-    根据 status['branch_images'] 中记录的镜像文件名更新对应服务的 image 字段
+    根据 status['branch_images'] 中记录的 image_full（原始镜像地址）更新对应服务的 image 字段。
+    注意：image 字段必须是 docker pull 能识别的地址（如 192.168.100.213:8083/app/wcs:tag），
+    而不是 docker save 产物文件名（如 JE250058-WCS-20260703-01.image）。
 
     Args:
         compose_path: docker-compose.yml 路径
@@ -1136,42 +1169,32 @@ def _update_compose_for_projectcode(compose_path, projectcode, status):
     with open(compose_path, 'r', encoding='utf-8') as f:
         lines = f.readlines()
 
-    updated = 0
-    # 收集所有规范化镜像名（如 JE250629-WMS-2026-06-25-01.image）
-    canonical_names = list(branch_images.values())
-
-    for i, line in enumerate(lines):
-        stripped = line.strip()
-        if stripped.startswith('image:'):
-            # 检查是否需要更新（基于 projectcode 前缀匹配）
-            # 这里简化逻辑：将包含 projectcode 的 image 行更新为最新的规范化镜像名
-            # 实际项目中应根据服务名（wms/wcs/frontend）匹配
-            indent = line[:len(line) - len(line.lstrip())]
-            old_image = stripped.split('image:', 1)[1].strip()
-            # 简化：按 image_type 顺序更新（WMS → 第一个，WCS → 第二个...）
-            # 实际应基于服务名映射，这里先按顺序分配
-            # TODO: 根据实际 docker-compose.yml 结构精确匹配
-            pass
-
-    # 简化实现：遍历 branch_images，按 image_type 更新对应服务
-    # 假设 docker-compose.yml 中有 wms/wcs/frontend 服务，按 image_type 匹配
+    # image_type → docker-compose 服务名映射
     type_to_service = {
         'WMS': ['wms', 'wms-application'],
         'WCS': ['wcs', 'shdy-dispatch-system'],
         'FRONTEND': ['frontend', 'acre-web'],
     }
 
-    # 按类型分组镜像
-    type_images = {}
-    for branch, image_name in branch_images.items():
-        # 从文件名解析类型：JE250629-WMS-2026-06-25-01.image
+    # 按 image_type 分组，收集每个类型对应的 image_full（原始镜像地址）
+    type_image_full = {}
+    for branch, info in branch_images.items():
+        # 兼容旧格式（info 为字符串）
+        if isinstance(info, dict):
+            image_name = info.get('image_name', '')
+            image_full = info.get('image_full', '')
+        else:
+            image_name = info
+            image_full = ''
+        # 从文件名解析类型：JE250058-WCS-20260703-01.image → WCS
         parts = image_name.split('-')
         if len(parts) >= 2:
             img_type = parts[1]
-            if img_type not in type_images:
-                type_images[img_type] = image_name
+            if img_type not in type_image_full and image_full:
+                type_image_full[img_type] = image_full
 
-    for img_type, image_name in type_images.items():
+    updated = 0
+    for img_type, image_full in type_image_full.items():
         services = type_to_service.get(img_type, [])
         for service in services:
             for i, line in enumerate(lines):
@@ -1179,8 +1202,8 @@ def _update_compose_for_projectcode(compose_path, projectcode, status):
                 if stripped.startswith('image:') and service in stripped.lower():
                     indent = line[:len(line) - len(line.lstrip())]
                     old_image = stripped.split('image:', 1)[1].strip()
-                    lines[i] = f"{indent}image: {projectcode}/{image_name}\n"
-                    print(f"  更新服务 {service}: {old_image} -> {projectcode}/{image_name}")
+                    lines[i] = f"{indent}image: {image_full}\n"
+                    print(f"  更新服务 {service}: {old_image} -> {image_full}")
                     updated += 1
                     break
 
