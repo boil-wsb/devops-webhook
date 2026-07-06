@@ -526,11 +526,32 @@ def load_projectcode_status(projectcode, minio_config=None):
 
     # 3. 初始化
     expected = collect_expected_branches(projectcode)
+
+    # P0 修复: status.json 丢失时，检查 MinIO 是否已有 {projectcode}/deploy.zip
+    # 如果已有 deploy.zip，说明首次打包已完成，避免误走首次模式导致重复打包
+    first_pack_completed = False
+    if minio_config:
+        try:
+            client = get_minio_client(
+                minio_config['endpoint'],
+                minio_config['access_key'],
+                minio_config['secret_key'],
+            )
+            bucket = minio_config.get('bucket', 'workorder')
+            try:
+                client.stat_object(bucket, f"{projectcode}/deploy.zip")
+                first_pack_completed = True
+                print(f"  status.json 丢失但 MinIO 已有 {projectcode}/deploy.zip，标记 first_pack_completed=True")
+            except Exception:
+                pass  # deploy.zip 不存在，保持 first_pack_completed=False
+        except Exception:
+            pass  # MinIO 连接失败，保持 first_pack_completed=False
+
     status = {
         'projectcode': projectcode,
         'expected_branches': expected,
         'completed_branches': [],
-        'first_pack_completed': False,
+        'first_pack_completed': first_pack_completed,
         'created_at': datetime.now().isoformat(),
         'updated_at': datetime.now().isoformat(),
     }

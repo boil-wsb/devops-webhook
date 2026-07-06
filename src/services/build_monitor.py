@@ -10,9 +10,13 @@ from src.services.message import send_formatted_message, send_notification
 
 def send_long_build_alert(build_info, route_name):
     """
-    发送构建超时告警
+    发送构建超时告警，复用原卡片更新（避免多次发送新卡片）
+
+    - 首次告警（info 级别）：发送新卡片，记录 message_id 和 callback_id
+    - 后续升级告警（warning/critical）：用 message_id + callback_id 更新原卡片
+
     Args:
-        build_info: 构建信息字典
+        build_info: 构建信息字典，含 alert_level / alert_message_id / alert_callback_id
         route_name: webhook路由名称
     """
     import logging
@@ -21,6 +25,25 @@ def send_long_build_alert(build_info, route_name):
     try:
         duration_minutes = int((datetime.now() - build_info['start_time']).total_seconds() / 60)
         detail_url = build_info.get('detail_url', '')
+        alert_level = build_info.get('alert_level', 'info')
+        existing_message_id = build_info.get('alert_message_id')
+        existing_callback_id = build_info.get('alert_callback_id')
+
+        # 按 alert_level 选择标题颜色
+        level_template = {
+            'info': 'yellow',
+            'warning': 'orange',
+            'critical': 'red',
+        }.get(alert_level, 'yellow')
+
+        level_text = {
+            'info': '构建超时告警',
+            'warning': '构建超时升级（warning）',
+            'critical': '构建超时严重（critical）',
+        }.get(alert_level, '构建超时告警')
+
+        # callback_id 复用：首次生成，后续沿用
+        callback_id = existing_callback_id or f"build_timeout_{build_info['pipeline_iid']}"
 
         long_build_message = {
             "msg_type": "interactive",
@@ -34,13 +57,13 @@ def send_long_build_alert(build_info, route_name):
                 "header": {
                     "title": {
                         "tag": "plain_text",
-                        "content": f"⚠️ 构建超时告警 - {build_info['project_name']}"
+                        "content": f"⚠️ {level_text} - {build_info['project_name']}"
                     },
                     "subtitle": {
                         "tag": "plain_text",
-                        "content": f"构建已运行 {duration_minutes} 分钟，仍未完成"
+                        "content": f"构建已运行 {duration_minutes} 分钟，仍未完成（级别：{alert_level}）"
                     },
-                    "template": "yellow"
+                    "template": level_template
                 },
                 "i18n_elements": {
                     "zh_cn": [
@@ -51,7 +74,8 @@ def send_long_build_alert(build_info, route_name):
                                         f"**提交人员**：{build_info['user_name']}\n"
                                         f"**开始时间**：{build_info['start_time_str']}\n"
                                         f"**Pipeline IID**：{build_info['pipeline_iid']}\n"
-                                        f"**状态**：运行中（超过5分钟）\n"
+                                        f"**状态**：运行中（已超时 {duration_minutes} 分钟）\n"
+                                        f"**告警级别**：{alert_level}\n"
                                         f"**建议**：检查构建过程是否卡死或存在性能问题",
                             "text_align": "left",
                             "text_size": "normal"
@@ -60,14 +84,24 @@ def send_long_build_alert(build_info, route_name):
                 }
             }
         }
-        
+
         chat_id = ROUTE_CHAT_ID_MAP.get(route_name) or build_info.get('chat_id')
-        result = send_notification(route_name, long_build_message, chat_id=chat_id)
+
+        # 优先更新原卡片；无原卡片时发送新卡片
+        result = send_notification(
+            route_name, long_build_message, chat_id=chat_id,
+            message_id=existing_message_id, callback_id=callback_id,
+        )
+
         if result.get('success'):
-            app_logger.info(f"build_monitor | timeout_alert_sent | pipeline_iid={build_info['pipeline_iid']}, route={route_name}, method={result.get('method')}")
+            new_message_id = result.get('message_id') or existing_message_id
+            # 回写 message_id 和 callback_id 到 build_info，供后续升级告警复用
+            build_info['alert_message_id'] = new_message_id
+            build_info['alert_callback_id'] = callback_id
+            app_logger.info(f"build_monitor | timeout_alert_sent | pipeline_iid={build_info['pipeline_iid']}, route={route_name}, level={alert_level}, method={result.get('method')}, message_id={new_message_id}")
         else:
-            app_logger.error(f"build_monitor | timeout_alert_failed | pipeline_iid={build_info['pipeline_iid']}")
-        
+            app_logger.error(f"build_monitor | timeout_alert_failed | pipeline_iid={build_info['pipeline_iid']}, level={alert_level}")
+
     except Exception as e:
         app_logger.error(f"build_monitor | timeout_alert_failed | error={e}")
 
@@ -140,16 +174,23 @@ def check_long_running_builds(running_builds, running_builds_lock):
                     try:
                         route_name = info.get('route_name', '')
                         send_long_build_alert(info, route_name)
-                        return iid, True, None
+                        # 返回 info 中可能被回写的 message_id / callback_id
+                        return iid, True, None, info.get('alert_message_id'), info.get('alert_callback_id')
                     except Exception as e:
-                        return iid, False, e
+                        return iid, False, e, None, None
 
                 with ThreadPoolExecutor(max_workers=3) as pool:
                     results = list(pool.map(_send_single, builds_to_alert))
 
-                for iid, success, err in results:
+                for iid, success, err, msg_id, cb_id in results:
                     if success:
                         app_logger.info(f"build_monitor | alert_sent | pipeline_iid={iid}")
+                        # 回写 message_id / callback_id 到原 running_builds，供后续升级告警复用
+                        if msg_id:
+                            with running_builds_lock:
+                                if iid in running_builds:
+                                    running_builds[iid]['alert_message_id'] = msg_id
+                                    running_builds[iid]['alert_callback_id'] = cb_id
                     else:
                         app_logger.error(f"build_monitor | alert_failed | pipeline_iid={iid}, error={err}")
                         # 告警失败：从 alerted_levels 移除该级别，下次循环重试

@@ -116,6 +116,24 @@ def _ensure_projectcode_status_dir():
     os.makedirs(status_dir, exist_ok=True)
 
 
+# projectcode 级别串行锁：相同 projectcode 的部署任务排队执行
+# 避免 _ensure_base_deploy_package / docker save / pack 并发覆盖 workorder/deploy 目录
+_projectcode_exec_locks = {}
+_projectcode_exec_locks_guard = threading.Lock()
+
+
+def _get_projectcode_exec_lock(projectcode):
+    """获取 projectcode 级别的串行执行锁（惰性创建）
+
+    相同 projectcode 的部署任务共用一个 Lock，确保串行执行。
+    不同 projectcode 之间并发执行，互不阻塞。
+    """
+    with _projectcode_exec_locks_guard:
+        if projectcode not in _projectcode_exec_locks:
+            _projectcode_exec_locks[projectcode] = threading.Lock()
+        return _projectcode_exec_locks[projectcode]
+
+
 def _download_workorder(action):
     """当 action 配置 workorder: true 时，从 MinIO 下载 deploy.zip（MD5 一致则跳过），并解压"""
     import zipfile
@@ -665,9 +683,19 @@ def manual_trigger(action_name, ref='', pipeline_iid=None):
     has_ssh = action.get('ssh_host')
     target = _execute_ssh if has_ssh else _execute_local
 
+    # projectcode 级别串行：与 check_and_trigger 共用同一把锁
+    ref_projectcodes = action.get('ref_projectcodes', {})
+    projectcode = ref_projectcodes.get(ref, '') if ref_projectcodes else ''
+
     def _wrapped():
         _start = datetime.now()
-        target(action, path_with_namespace, ref, project_name, pipeline_iid, trigger_source='manual', start_time=_start)
+        if projectcode:
+            lock = _get_projectcode_exec_lock(projectcode)
+            with lock:
+                logger.info(f"trigger_action | projectcode_lock_acquired | action={action.get('name')}, projectcode={projectcode}, ref={ref}, source=manual")
+                target(action, path_with_namespace, ref, project_name, pipeline_iid, trigger_source='manual', start_time=_start)
+        else:
+            target(action, path_with_namespace, ref, project_name, pipeline_iid, trigger_source='manual', start_time=_start)
 
     thread = threading.Thread(target=_wrapped, daemon=True)
     thread.start()
@@ -687,16 +715,28 @@ def check_and_trigger(path_with_namespace, ref, project_name='', pipeline_iid=No
         name = action.get('name', 'unknown')
         logger.info(f"trigger_action | condition_match | action={name}, project={project_name}, ref={ref}")
 
-        # workorder 下载（配置 workorder: true 时触发）
-        if action.get('workorder'):
-            # 若配置了 ref_projectcodes，确保 projectcode 状态目录存在
-            if action.get('ref_projectcodes'):
-                _ensure_projectcode_status_dir()
-            _download_workorder(action)
+        # 若配置了 ref_projectcodes，确保 projectcode 状态目录存在
+        if action.get('ref_projectcodes'):
+            _ensure_projectcode_status_dir()
 
         # 有 SSH 配置则远程执行，否则本地执行
         has_ssh = action.get('ssh_host')
         target = _execute_ssh if has_ssh else _execute_local
 
-        thread = threading.Thread(target=target, args=(action, path_with_namespace, ref, project_name, pipeline_iid), daemon=True)
+        # projectcode 级别串行：相同 projectcode 的任务排队执行
+        # 避免 _ensure_base_deploy_package / docker save / pack 并发覆盖 workorder/deploy 目录
+        ref_projectcodes = action.get('ref_projectcodes', {})
+        projectcode = ref_projectcodes.get(ref, '') if ref_projectcodes else ''
+
+        def _run_task(action=action, ref=ref, project_name=project_name,
+                      pipeline_iid=pipeline_iid, projectcode=projectcode):
+            if projectcode:
+                lock = _get_projectcode_exec_lock(projectcode)
+                with lock:
+                    logger.info(f"trigger_action | projectcode_lock_acquired | action={action.get('name')}, projectcode={projectcode}, ref={ref}")
+                    target(action, path_with_namespace, ref, project_name, pipeline_iid)
+            else:
+                target(action, path_with_namespace, ref, project_name, pipeline_iid)
+
+        thread = threading.Thread(target=_run_task, daemon=True)
         thread.start()
