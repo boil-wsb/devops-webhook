@@ -450,6 +450,44 @@ def generate_md5_file(filepath):
     return md5_file_path
 
 
+def _get_artifact_minio_path(projectcode, image_type, image_name):
+    """生成增量产物在 MinIO 的归档路径
+
+    格式: {projectcode}/{image_type}/{yyyymmdd}/{image_name}
+    例如: JE250058/WCS/20260707/JE250058-WCS-20260707-01.image
+
+    Args:
+        projectcode: 项目代码（如 JE250058）
+        image_type: 镜像类型（WMS/WCS/FRONTEND）
+        image_name: 产物文件名（如 JE250058-WCS-20260707-01.image）
+
+    Returns:
+        str: MinIO 对象路径
+    """
+    # 从 image_name 提取日期（格式: projectcode-TYPE-yyyymmdd-序号.image）
+    parts = image_name.split('-')
+    if len(parts) >= 3 and len(parts[2]) == 8 and parts[2].isdigit():
+        date_str = parts[2]
+    else:
+        date_str = datetime.now().strftime('%Y%m%d')
+    return f"{projectcode}/{image_type}/{date_str}/{image_name}"
+
+
+def _get_artifact_minio_prefix(projectcode, image_type):
+    """生成增量产物在 MinIO 的扫描前缀（用于 list_objects）
+
+    格式: {projectcode}/{image_type}/
+
+    Args:
+        projectcode: 项目代码（如 JE250058）
+        image_type: 镜像类型（WMS/WCS/FRONTEND）
+
+    Returns:
+        str: MinIO 扫描前缀
+    """
+    return f"{projectcode}/{image_type}/"
+
+
 def generate_canonical_image_name(projectcode, image_type, scan_dir=None, minio_client=None, minio_bucket='workorder'):
     """生成规范化镜像文件名 [projectcode]-[TYPE]-[yyyymmdd]-[序号].image
 
@@ -481,9 +519,10 @@ def generate_canonical_image_name(projectcode, image_type, scan_dir=None, minio_
                     max_seq = seq
 
     # 扫描 MinIO（本地未找到时回退）
+    # P1 优化: 路径格式 {projectcode}/{image_type}/{yyyymmdd}/
     if max_seq == 0 and minio_client is not None:
         try:
-            prefix_minio = f"{projectcode}/images/"
+            prefix_minio = _get_artifact_minio_prefix(projectcode, image_type)
             objects = minio_client.list_objects(minio_bucket, prefix=prefix_minio, recursive=True)
             for obj in objects:
                 filename = os.path.basename(obj.object_name)
@@ -1003,15 +1042,16 @@ def _orchestrate_image_deploy_impl(image_full, projectcode, image_type, branch, 
 
     # 5. 根据模式处理
     if first_pack_completed:
-        # 增量模式：直接上传到 MinIO {projectcode}/images/
+        # 增量模式：直接上传到 MinIO {projectcode}/{image_type}/{yyyymmdd}/
         minio_client = get_minio_client(
             minio_config['endpoint'],
             minio_config['access_key'],
             minio_config['secret_key'],
         )
         bucket = minio_config.get('bucket', 'workorder')
-        upload_to_minio(minio_client, bucket, image_path, f"{projectcode}/images/{image_name}")
-        upload_to_minio(minio_client, bucket, md5_path, f"{projectcode}/images/{image_name}.md5")
+        artifact_path = _get_artifact_minio_path(projectcode, image_type, image_name)
+        upload_to_minio(minio_client, bucket, image_path, artifact_path)
+        upload_to_minio(minio_client, bucket, md5_path, artifact_path + '.md5')
         # 更新状态
         report_branch_completed(projectcode, branch, image_name, minio_config, image_full=image_full)
         # 清理临时文件
@@ -1131,6 +1171,7 @@ def _orchestrate_file_deploy_impl(local_file_path, projectcode, image_type, bran
     # 4. 根据模式处理
     if first_pack_completed:
         # 增量模式：重新打包 deploy.zip 上传 MinIO
+        # P1 优化: 归档路径 {projectcode}/FRONTEND/{yyyymmdd}/{image_name 但扩展名改为 .zip}
         local_zip = os.path.join(deploy_dir, '..', 'deploy.zip')
         print(f"  增量打包: {deploy_dir} -> {local_zip}")
         with _zipfile.ZipFile(local_zip, 'w', _zipfile.ZIP_DEFLATED) as zf:
@@ -1140,8 +1181,11 @@ def _orchestrate_file_deploy_impl(local_file_path, projectcode, image_type, bran
                     arcname = os.path.relpath(file_path, deploy_dir)
                     zf.write(file_path, arcname)
         md5_path = generate_md5_file(local_zip)
-        upload_to_minio(minio_client, bucket, local_zip, f"{projectcode}/deploy.zip")
-        upload_to_minio(minio_client, bucket, md5_path, f"{projectcode}/deploy.zip.md5")
+        # 前端 zip 归档文件名：将 .image 扩展名改为 .zip
+        archive_name = image_name.rsplit('.', 1)[0] + '.zip' if image_name.endswith('.image') else image_name
+        artifact_path = _get_artifact_minio_path(projectcode, image_type, archive_name)
+        upload_to_minio(minio_client, bucket, local_zip, artifact_path)
+        upload_to_minio(minio_client, bucket, md5_path, artifact_path + '.md5')
         # 更新状态
         report_branch_completed(projectcode, branch, image_name, minio_config, image_full='')
         # 清理临时文件
