@@ -83,7 +83,7 @@ def get_workorder_deploy_dir():
     return os.path.join(project_root, 'workorder', 'deploy')
 
 
-def _ensure_base_deploy_package(minio_config):
+def _ensure_base_deploy_package(minio_config, projectcode=None):
     """确保基准部署包已从 MinIO 下载并解压到 workorder/deploy/
 
     在 orchestrate_image_deploy / orchestrate_file_deploy 处理前调用。
@@ -91,20 +91,33 @@ def _ensure_base_deploy_package(minio_config):
     workorder/deploy/ 作为后续镜像 save 和打包的基础。
 
     流程：
-    1. 从 MinIO 下载 deploy.zip.md5
-    2. 本地 MD5 一致则跳过下载
-    3. 否则下载 deploy.zip
-    4. 已解压且 MD5 标记一致则跳过解压
-    5. 否则解压到 workorder/deploy/ 并写入 .zip_md5 标记
+    1. 增量模式（first_pack_completed=True）下跳过下载解压，避免覆盖产物
+    2. 首次模式下从 MinIO 下载 deploy.zip.md5
+    3. 本地 MD5 一致则跳过下载
+    4. 否则下载 deploy.zip
+    5. 已解压且 MD5 标记一致则跳过解压
+    6. 否则解压到 workorder/deploy/ 并写入 .zip_md5 标记
 
     Args:
         minio_config: MinIO 配置 dict（endpoint/access_key/secret_key/bucket）
+        projectcode: 工单号，用于检查 first_pack_completed 状态（增量模式跳过下载）
     """
     import zipfile
 
     if not minio_config:
         ensure_workorder_dirs()
         return
+
+    # P0 修复: 增量模式下跳过基准包下载解压，避免覆盖 deploy/images/ 中的产物
+    if projectcode:
+        try:
+            status = load_projectcode_status(projectcode, minio_config)
+            if status.get('first_pack_completed'):
+                print(f"  基准包: 增量模式跳过下载解压（first_pack_completed=True）")
+                ensure_workorder_dirs()
+                return
+        except Exception as e:
+            print(f"  基准包: 状态检查失败，按首次模式处理: {e}")
 
     try:
         client = get_minio_client(
@@ -917,8 +930,8 @@ def _orchestrate_image_deploy_impl(image_full, projectcode, image_type, branch, 
         str: 生成的镜像文件名
     """
     # 0. 确保基准包已从 MinIO 下载并解压到 workorder/deploy/
-    #    首次模式打包容镜像到 deploy/images/，增量模式不影响（基准包已存在则跳过）
-    _ensure_base_deploy_package(minio_config)
+    #    首次模式下载基准包，增量模式跳过（避免覆盖 deploy/images/ 中的产物）
+    _ensure_base_deploy_package(minio_config, projectcode)
 
     # 1. 加载状态判断模式
     status = load_projectcode_status(projectcode, minio_config)
@@ -949,9 +962,9 @@ def _orchestrate_image_deploy_impl(image_full, projectcode, image_type, branch, 
             print(f"  当前分支 {branch} 已标记完成但无产物记录，重新生成")
             status['completed_branches'] = [b for b in status.get('completed_branches', []) if b != branch]
         else:
-            # 增量模式且已有产物记录
-            print(f"  当前分支 {branch} 已标记完成，跳过下载")
-            return cached_image
+            # P0 修复: 增量模式下不跳过 save，因为 pipeline 触发了新版本
+            # 首次模式的跳过逻辑已在上面 if not first_pack_completed 分支处理
+            print(f"  当前分支 {branch} 已标记完成，增量模式继续 save 新版本")
 
     # 2. 生成规范化文件名
     if first_pack_completed:
@@ -1041,7 +1054,8 @@ def _orchestrate_file_deploy_impl(local_file_path, projectcode, image_type, bran
     import zipfile as _zipfile
 
     # 0. 确保基准包已从 MinIO 下载并解压到 workorder/deploy/
-    _ensure_base_deploy_package(minio_config)
+    #    首次模式下载基准包，增量模式跳过（避免覆盖 deploy/nginx/dist 中的产物）
+    _ensure_base_deploy_package(minio_config, projectcode)
 
     # 1. 加载状态判断模式
     status = load_projectcode_status(projectcode, minio_config)
@@ -1073,9 +1087,8 @@ def _orchestrate_file_deploy_impl(local_file_path, projectcode, image_type, bran
             print(f"  当前分支 {branch} 已标记完成但无产物记录，重新生成")
             status['completed_branches'] = [b for b in status.get('completed_branches', []) if b != branch]
         else:
-            # 增量模式且已有产物记录
-            print(f"  当前分支 {branch} 已标记完成，跳过下载")
-            return cached_image
+            # P0 修复: 增量模式下不跳过处理，因为 pipeline 触发了新版本
+            print(f"  当前分支 {branch} 已标记完成，增量模式继续处理新版本")
 
     minio_client = get_minio_client(
         minio_config['endpoint'],
@@ -1205,6 +1218,17 @@ def pack_and_upload_deploy(projectcode, minio_config):
         # 5. 标记 first_pack_completed=true
         status['first_pack_completed'] = True
         save_projectcode_status(projectcode, status, minio_config)
+
+        # P0 修复: 同步更新 .zip_md5 标记，避免下次 _ensure_base_deploy_package 误判 MD5 不一致
+        # pack_and_upload_deploy 打包后本地 deploy.zip 已更新，.zip_md5 需同步为新 MD5
+        try:
+            extract_md5_file = os.path.join(deploy_dir, '.zip_md5')
+            new_md5 = _calc_md5(local_zip)
+            with open(extract_md5_file, 'w') as f:
+                f.write(new_md5)
+        except Exception as e:
+            print(f"  警告: 更新 .zip_md5 标记失败: {e}")
+
         print(f"  projectcode={projectcode} 首次打包完成")
 
 
