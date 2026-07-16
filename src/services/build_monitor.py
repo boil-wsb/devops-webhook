@@ -20,13 +20,19 @@ def send_long_build_alert(build_info, route_name):
         route_name: webhook路由名称
     """
     import logging
+    from logger.context import set_request_context, clear_request_context
     # 使用标准的logging模块，避免导入问题
     app_logger = logging.getLogger('app_logger')
+
+    # 透传原始请求 ID，形成链路日志
+    req_id = build_info.get('req_id', '')
+    if req_id:
+        set_request_context(request_id=req_id)
+
     try:
         duration_minutes = int((datetime.now() - build_info['start_time']).total_seconds() / 60)
         detail_url = build_info.get('detail_url', '')
         alert_level = build_info.get('alert_level', 'info')
-        existing_message_id = build_info.get('alert_message_id')
         existing_callback_id = build_info.get('alert_callback_id')
 
         # 按 alert_level 选择标题颜色
@@ -42,7 +48,7 @@ def send_long_build_alert(build_info, route_name):
             'critical': '构建超时严重（critical）',
         }.get(alert_level, '构建超时告警')
 
-        # callback_id 复用：首次生成，后续沿用
+        # callback_id 同时作为 open_message_id，首次生成，后续沿用用于更新原卡片
         callback_id = existing_callback_id or f"build_timeout_{build_info['pipeline_iid']}"
 
         long_build_message = {
@@ -87,23 +93,25 @@ def send_long_build_alert(build_info, route_name):
 
         chat_id = ROUTE_CHAT_ID_MAP.get(route_name) or build_info.get('chat_id')
 
-        # 优先更新原卡片；无原卡片时发送新卡片
+        # 首次告警（无 existing_callback_id）：发送新卡片，open_message_id=None 走首次发送分支
+        # 后续升级告警（有 existing_callback_id）：用 open_message_id 更新原卡片，避免发新卡片
         result = send_notification(
             route_name, long_build_message, chat_id=chat_id,
-            message_id=existing_message_id, callback_id=callback_id,
+            open_message_id=existing_callback_id, callback_id=callback_id,
         )
 
         if result.get('success'):
-            new_message_id = result.get('message_id') or existing_message_id
-            # 回写 message_id 和 callback_id 到 build_info，供后续升级告警复用
-            build_info['alert_message_id'] = new_message_id
+            # 回写 callback_id 到 build_info，供后续升级告警复用（作为 open_message_id）
             build_info['alert_callback_id'] = callback_id
-            app_logger.info(f"build_monitor | timeout_alert_sent | pipeline_iid={build_info['pipeline_iid']}, route={route_name}, level={alert_level}, method={result.get('method')}, message_id={new_message_id}")
+            app_logger.info(f"build_monitor | timeout_alert_sent | pipeline_iid={build_info['pipeline_iid']}, route={route_name}, level={alert_level}, method={result.get('method')}, open_message_id={callback_id}")
         else:
             app_logger.error(f"build_monitor | timeout_alert_failed | pipeline_iid={build_info['pipeline_iid']}, level={alert_level}")
 
     except Exception as e:
         app_logger.error(f"build_monitor | timeout_alert_failed | error={e}")
+    finally:
+        if req_id:
+            clear_request_context()
 
 
 def check_long_running_builds(running_builds, running_builds_lock):
@@ -174,22 +182,21 @@ def check_long_running_builds(running_builds, running_builds_lock):
                     try:
                         route_name = info.get('route_name', '')
                         send_long_build_alert(info, route_name)
-                        # 返回 info 中可能被回写的 message_id / callback_id
-                        return iid, True, None, info.get('alert_message_id'), info.get('alert_callback_id')
+                        # 返回 info 中可能被回写的 callback_id（作为后续更新的 open_message_id）
+                        return iid, True, None, info.get('alert_callback_id')
                     except Exception as e:
-                        return iid, False, e, None, None
+                        return iid, False, e, None
 
                 with ThreadPoolExecutor(max_workers=3) as pool:
                     results = list(pool.map(_send_single, builds_to_alert))
 
-                for iid, success, err, msg_id, cb_id in results:
+                for iid, success, err, cb_id in results:
                     if success:
                         app_logger.info(f"build_monitor | alert_sent | pipeline_iid={iid}")
-                        # 回写 message_id / callback_id 到原 running_builds，供后续升级告警复用
-                        if msg_id:
+                        # 回写 callback_id 到原 running_builds，供后续升级告警作为 open_message_id 复用
+                        if cb_id:
                             with running_builds_lock:
                                 if iid in running_builds:
-                                    running_builds[iid]['alert_message_id'] = msg_id
                                     running_builds[iid]['alert_callback_id'] = cb_id
                     else:
                         app_logger.error(f"build_monitor | alert_failed | pipeline_iid={iid}, error={err}")

@@ -102,27 +102,36 @@ def process_webhook(request, route_name, subpath=None):
                 status = payload['object_attributes'].get('status', '')
 
                 chat_id = ROUTE_CHAT_ID_MAP.get(route_name)
-                message_id = None
+                pipeline_iid = payload['object_attributes'].get('iid')
+                message_id = None  # 作为"是否已发送卡片"的标志
                 callback_id = None
                 if running_builds and running_builds_lock:
                     with running_builds_lock:
-                        build_info = running_builds.get(payload['object_attributes'].get('iid'))
+                        build_info = running_builds.get(pipeline_iid)
                         if build_info:
                             message_id = build_info.get('message_id')
                             callback_id = build_info.get('callback_id')
                             if not chat_id:
                                 chat_id = build_info.get('chat_id')
 
+                # 首次发送时 callback_id 可能为 None（running_builds 还未记录），
+                # 用 pipeline_{iid} 作为默认值，确保 send_notification 携带 open_message_id 注册到 ops-manager
+                if not callback_id:
+                    callback_id = f"pipeline_{pipeline_iid}"
+
                 try:
                     message = format_message(payload, running_builds, running_builds_lock, route_name, push_records, push_records_lock)
                     if message:
 
-                        result = send_notification(route_name, message, chat_id=chat_id, message_id=message_id, callback_id=callback_id)
+                        # 已发送过卡片（有 message_id）则用 callback_id 作为 open_message_id 更新原卡片
+                        # 未发送过（无 message_id）则首次发送，send_notification 内部用 callback_id 作为 open_message_id
+                        open_message_id = callback_id if message_id else None
+                        result = send_notification(route_name, message, chat_id=chat_id, open_message_id=open_message_id, callback_id=callback_id)
                         app_logger.info(f"webhook | send_result | route={route_name}, method={result.get('method')}, success={result.get('success')}")
 
+                        # running 状态首次发送成功后，存储 message_id 作为"已发送"标志
                         if status == 'running' and result.get('method') == 'api' and result.get('message_id'):
                             with running_builds_lock:
-                                pipeline_iid = payload['object_attributes'].get('iid')
                                 if pipeline_iid in running_builds:
                                     running_builds[pipeline_iid]['message_id'] = result['message_id']
                                     running_builds[pipeline_iid]['chat_id'] = chat_id

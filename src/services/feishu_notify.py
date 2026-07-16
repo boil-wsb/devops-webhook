@@ -1,3 +1,4 @@
+import json
 import logging
 import time
 import requests
@@ -270,7 +271,7 @@ def send_action_result(action_name, project_name, ref, success, output='', error
     notify_url = f"{base_url.rstrip('/')}/api/v1/feishu/notify"
 
     try:
-        resp = requests.post(notify_url, json=payload, headers=headers, timeout=15)
+        resp = requests.post(notify_url, json=payload, headers=headers, timeout=40)
         resp.raise_for_status()
         result = resp.json()
         if result.get('success'):
@@ -282,7 +283,7 @@ def send_action_result(action_name, project_name, ref, success, output='', error
         new_token = _refresh_token_on_401(e, headers)
         if new_token:
             try:
-                resp = requests.post(notify_url, json=payload, headers=headers, timeout=15)
+                resp = requests.post(notify_url, json=payload, headers=headers, timeout=40)
                 resp.raise_for_status()
                 result = resp.json()
                 if result.get('success'):
@@ -297,7 +298,7 @@ def send_action_result(action_name, project_name, ref, success, output='', error
         logger.error(f"feishu_notify | action_send_exception | error={e}")
 
 
-def send_card_via_api(card_content, chat_id=None, notify_user=None, callback_id=None):
+def send_card_via_api(card_content, chat_id=None, notify_user=None, callback_id=None, open_message_id=None):
     config = _get_notify_config()
     if not config:
         return None
@@ -329,11 +330,14 @@ def send_card_via_api(card_content, chat_id=None, notify_user=None, callback_id=
     }
     if callback_id and callback_id.strip():
         payload["callback_id"] = callback_id.strip()
+    # 携带自定义消息标识，后续可通过 PATCH /notify-by-open-id/{open_message_id} 更新卡片
+    if open_message_id and open_message_id.strip():
+        payload["open_message_id"] = open_message_id.strip()
 
     notify_url = f"{base_url.rstrip('/')}/api/v1/feishu/notify"
 
     try:
-        resp = requests.post(notify_url, json=payload, headers=headers, timeout=15)
+        resp = requests.post(notify_url, json=payload, headers=headers, timeout=40)
         resp.raise_for_status()
         result = resp.json()
         if result.get('success'):
@@ -347,7 +351,7 @@ def send_card_via_api(card_content, chat_id=None, notify_user=None, callback_id=
         new_token = _refresh_token_on_401(e, headers)
         if new_token:
             try:
-                resp = requests.post(notify_url, json=payload, headers=headers, timeout=15)
+                resp = requests.post(notify_url, json=payload, headers=headers, timeout=40)
                 resp.raise_for_status()
                 result = resp.json()
                 if result.get('success'):
@@ -367,7 +371,21 @@ def send_card_via_api(card_content, chat_id=None, notify_user=None, callback_id=
         return None
 
 
-def update_card_via_api(card_content, message_id, callback_id):
+def update_card_via_api(card_content, open_message_id, callback_id):
+    """通过 ops-manager 按自定义消息标识更新卡片
+
+    调用 PATCH /api/v1/feishu/notify-by-open-id/{open_message_id}
+    底层由 ops-manager 调用飞书 im.v1.message.patch API 实现原地更新（非发送新卡片）
+
+    Args:
+        card_content: 更新后的卡片 JSON 内容
+        open_message_id: 发送卡片时指定的自定义消息标识
+        callback_id: 业务回调标识，用于验证卡片归属（必须与发送时一致）
+    """
+    if not open_message_id:
+        logger.error("feishu_notify | update_card_failed | reason=missing_open_message_id")
+        return None
+
     config = _get_notify_config()
     if not config:
         return None
@@ -385,14 +403,14 @@ def update_card_via_api(card_content, message_id, callback_id):
         "callback_id": callback_id
     }
 
-    update_url = f"{base_url.rstrip('/')}/api/v1/feishu/notify/{message_id}"
+    update_url = f"{base_url.rstrip('/')}/api/v1/feishu/notify-by-open-id/{open_message_id}"
 
     try:
-        resp = requests.patch(update_url, json=payload, headers=headers, timeout=15)
+        resp = requests.patch(update_url, json=payload, headers=headers, timeout=40)
         resp.raise_for_status()
         result = resp.json()
         if result.get('success'):
-            logger.info(f"feishu_notify | card_updated | message_id={message_id}")
+            logger.info(f"feishu_notify | card_updated | open_message_id={open_message_id}, message_id={result.get('message_id')}")
             return result
         else:
             logger.error(f"feishu_notify | card_update_failed | error={result.get('error')}")
@@ -401,11 +419,11 @@ def update_card_via_api(card_content, message_id, callback_id):
         new_token = _refresh_token_on_401(e, headers)
         if new_token:
             try:
-                resp = requests.patch(update_url, json=payload, headers=headers, timeout=15)
+                resp = requests.patch(update_url, json=payload, headers=headers, timeout=40)
                 resp.raise_for_status()
                 result = resp.json()
                 if result.get('success'):
-                    logger.info("feishu_notify | card_update_retry | success=true")
+                    logger.info(f"feishu_notify | card_update_retry | success=true, open_message_id={open_message_id}")
                     return result
                 else:
                     logger.error(f"feishu_notify | card_update_retry | success=false, error={result.get('error')}")
@@ -414,7 +432,9 @@ def update_card_via_api(card_content, message_id, callback_id):
                 logger.error(f"feishu_notify | card_update_retry_failed | error={retry_e}")
                 return None
         else:
-            logger.error(f"feishu_notify | card_update_failed | error={e}")
+            # 记录具体状态码便于排查（403: callback_id 不匹配，404: 通知记录未找到）
+            status_code = e.response.status_code if e.response is not None else 'N/A'
+            logger.error(f"feishu_notify | card_update_failed | open_message_id={open_message_id}, status={status_code}, error={e}")
             return None
     except Exception as e:
         logger.error(f"feishu_notify | card_update_exception | error={e}")

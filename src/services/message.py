@@ -137,7 +137,20 @@ def _strip_commit_from_webhook_message(message):
     return stripped
 
 
-def send_notification(route_name, message, chat_id=None, message_id=None, callback_id=None):
+def send_notification(route_name, message, chat_id=None, open_message_id=None, callback_id=None):
+    """发送或更新飞书卡片通知
+
+    通过 ops-manager 的 open_message_id（自定义消息标识）实现卡片原地更新：
+    - 首次发送：调用 POST /api/v1/feishu/notify 携带 open_message_id
+    - 后续更新：调用 PATCH /api/v1/feishu/notify-by-open-id/{open_message_id} 原地更新卡片
+
+    Args:
+        route_name: webhook 路由名称
+        message: 飞书卡片消息（webhook 格式或 schema 2.0 格式）
+        chat_id: 飞书群聊 ID
+        open_message_id: 自定义消息标识，用于后续更新卡片（通常与 callback_id 一致）
+        callback_id: 业务回调标识，用于验证卡片归属
+    """
     app_logger = logging.getLogger('app_logger')
 
     if message.get('schema') == '2.0':
@@ -145,54 +158,61 @@ def send_notification(route_name, message, chat_id=None, message_id=None, callba
     else:
         card_content = convert_webhook_card_to_api_card(message)
 
-    if message_id and callback_id:
+    # 有 open_message_id 时优先更新原卡片，避免发送新卡片
+    if open_message_id and callback_id:
         try:
             from src.services.feishu_notify import update_card_via_api, store_sent_card
             store_sent_card(callback_id, card_content, chat_id=chat_id)
-            result = update_card_via_api(card_content, message_id, callback_id)
+            result = update_card_via_api(card_content, open_message_id, callback_id)
             if result and result.get('success'):
-                app_logger.info(f"message | api_update_success | route={route_name}")
+                app_logger.info(f"message | api_update_success | route={route_name}, open_message_id={open_message_id}")
                 return {
                     "success": True,
                     "method": "api_update",
-                    "message_id": message_id
+                    "message_id": result.get('message_id'),
+                    "open_message_id": open_message_id
                 }
             else:
                 app_logger.warning(f"message | api_update_fallback | route={route_name}, reason=api_failed, fallback=api_send")
         except Exception as e:
             app_logger.warning(f"message | api_update_fallback | route={route_name}, error={e}, fallback=api_send")
 
-        # API 更新失败，回退到 API 发送新卡片
+        # API 更新失败，回退到 API 发送新卡片（携带 open_message_id 以便后续更新）
         try:
             from src.services.feishu_notify import send_card_via_api, store_sent_card
             store_sent_card(callback_id, card_content, chat_id=chat_id)
-            result = send_card_via_api(card_content, chat_id=chat_id, callback_id=callback_id)
+            result = send_card_via_api(card_content, chat_id=chat_id, callback_id=callback_id, open_message_id=open_message_id)
             if result and result.get('success'):
-                app_logger.info(f"message | api_send_fallback_success | route={route_name}")
+                app_logger.info(f"message | api_send_fallback_success | route={route_name}, open_message_id={open_message_id}")
                 return {
                     "success": True,
                     "method": "api",
-                    "message_id": result.get('message_id')
+                    "message_id": result.get('message_id'),
+                    "open_message_id": open_message_id
                 }
             else:
                 app_logger.warning(f"message | api_send_fallback | route={route_name}, reason=api_failed, fallback=webhook")
         except Exception as e:
             app_logger.warning(f"message | api_send_fallback | route={route_name}, error={e}, fallback=webhook")
     else:
+        # 首次发送：携带 open_message_id（若有 callback_id 则用其作为 open_message_id）
+        effective_open_id = open_message_id or callback_id
         try:
             from src.services.feishu_notify import send_card_via_api, store_sent_card
             store_sent_card(callback_id, card_content, chat_id=chat_id)
             result = send_card_via_api(
                 card_content,
                 chat_id=chat_id,
-                callback_id=callback_id
+                callback_id=callback_id,
+                open_message_id=effective_open_id
             )
             if result and result.get('success'):
-                app_logger.info(f"message | api_send_success | route={route_name}")
+                app_logger.info(f"message | api_send_success | route={route_name}, open_message_id={effective_open_id}")
                 return {
                     "success": True,
                     "method": "api",
-                    "message_id": result.get('message_id')
+                    "message_id": result.get('message_id'),
+                    "open_message_id": effective_open_id
                 }
             else:
                 app_logger.warning(f"message | api_send_fallback | route={route_name}, reason=api_failed, fallback=webhook")
@@ -275,6 +295,7 @@ def _build_text_tag_list(pipeline_id, pipeline_iid, source):
 def _record_running_build(running_builds, running_builds_lock, pipeline_iid, project_name, branch, user_name, start_time, detail_url, route_name, commit_url, app_logger, chat_id=None):
     if running_builds is not None and running_builds_lock is not None:
         from datetime import datetime
+        from logger.context import request_id_var
         try:
             with running_builds_lock:
                 existing = running_builds.get(pipeline_iid, {})
@@ -290,7 +311,8 @@ def _record_running_build(running_builds, running_builds_lock, pipeline_iid, pro
                     'commit_url': commit_url,
                     'chat_id': chat_id,
                     'message_id': existing.get('message_id'),
-                    'callback_id': f"pipeline_{pipeline_iid}"
+                    'callback_id': f"pipeline_{pipeline_iid}",
+                    'req_id': request_id_var.get(''),  # 透传请求 ID，用于 build_monitor 链路日志
                 }
         except Exception as e:
             app_logger.error(f"message | record_running_build_failed | pipeline_iid={pipeline_iid}, error={e}")
