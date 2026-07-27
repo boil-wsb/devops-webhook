@@ -29,6 +29,7 @@ from src.services.trigger_action import check_and_trigger
 from src.services.message import send_notification
 from src.config import WEBHOOK_CONFIG, DEFAULT_TARGET_URL, ROUTE_CHAT_ID_MAP, get_config
 from src.utils import convert_utc_to_utc8
+from src.utils.pipeline_utils import make_build_key, make_callback_id
 
 
 def process_webhook(request, route_name, subpath=None):
@@ -103,11 +104,17 @@ def process_webhook(request, route_name, subpath=None):
 
                 chat_id = ROUTE_CHAT_ID_MAP.get(route_name)
                 pipeline_iid = payload['object_attributes'].get('iid')
+                # 加入项目维度避免跨项目 pipeline_iid 冲突：
+                # 不同 GitLab 项目的 pipeline_iid 各自从 1 开始，会重复。
+                # 仅用 pipeline_iid 作为 running_builds key 时，项目B 会误读项目A 的 build_info，
+                # 误判为"已发送卡片"走 PATCH 更新分支，覆盖项目A 的卡片。
+                project_id = payload.get('project', {}).get('id')
+                build_key = make_build_key(project_id, pipeline_iid)
                 message_id = None  # 作为"是否已发送卡片"的标志
                 callback_id = None
                 if running_builds and running_builds_lock:
                     with running_builds_lock:
-                        build_info = running_builds.get(pipeline_iid)
+                        build_info = running_builds.get(build_key)
                         if build_info:
                             message_id = build_info.get('message_id')
                             callback_id = build_info.get('callback_id')
@@ -115,9 +122,10 @@ def process_webhook(request, route_name, subpath=None):
                                 chat_id = build_info.get('chat_id')
 
                 # 首次发送时 callback_id 可能为 None（running_builds 还未记录），
-                # 用 pipeline_{iid} 作为默认值，确保 send_notification 携带 open_message_id 注册到 ops-manager
+                # 用 pipeline_{project_id}_{iid} 作为默认值，加入项目维度避免跨项目冲突，
+                # 确保 send_notification 携带 open_message_id 注册到 ops-manager
                 if not callback_id:
-                    callback_id = f"pipeline_{pipeline_iid}"
+                    callback_id = make_callback_id(project_id, pipeline_iid)
 
                 try:
                     message = format_message(payload, running_builds, running_builds_lock, route_name, push_records, push_records_lock)
@@ -132,9 +140,9 @@ def process_webhook(request, route_name, subpath=None):
                         # running 状态首次发送成功后，存储 message_id 作为"已发送"标志
                         if status == 'running' and result.get('method') == 'api' and result.get('message_id'):
                             with running_builds_lock:
-                                if pipeline_iid in running_builds:
-                                    running_builds[pipeline_iid]['message_id'] = result['message_id']
-                                    running_builds[pipeline_iid]['chat_id'] = chat_id
+                                if build_key in running_builds:
+                                    running_builds[build_key]['message_id'] = result['message_id']
+                                    running_builds[build_key]['chat_id'] = chat_id
 
                         if status == 'failed':
                             _handle_failed_pipeline(payload, route_name)

@@ -14,6 +14,13 @@ DevOps Webhook 服务提供 GitLab 流水线监控、飞书卡片通知、构建
 - **触发动作**: Pipeline 成功后通过 SSH 触发远程部署脚本
 - **内网免认证**: 支持 ops-manager 内网免 Token 访问
 
+## 业务流程图
+
+项目提供两套互补的 mermaid 流程图集，支持 GitHub / VS Code 预览渲染：
+
+- [业务逻辑流程图](docs/architecture/README.md) — 按业务场景跨模块串联，覆盖事件入口、Push/Pipeline 记录、飞书通知、构建失败/超时处理、Trigger Actions、projectcode 编排、监控告警、IT 巡检等 12 张图
+- [模块流程图集](docs/modules/README.md) — 按模块本质职责分组，聚焦单模块内部调用链、状态转换与决策分支，包含全局模块依赖图及 9 个模块组的流程详解
+
 ## 技术栈
 
 - **Web 框架**: Flask

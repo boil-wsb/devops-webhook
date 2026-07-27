@@ -3,6 +3,7 @@ import logging
 import requests
 from datetime import datetime
 from src.utils import format_duration, calculate_interval, convert_utc_to_utc8, find_similar_pipeline_records
+from src.utils.pipeline_utils import make_build_key, make_callback_id
 from src.config import WEBHOOK_CONFIG, DEFAULT_TARGET_URL, ROUTE_CHAT_ID_MAP
 
 
@@ -292,15 +293,24 @@ def _build_text_tag_list(pipeline_id, pipeline_iid, source):
     ]
 
 
-def _record_running_build(running_builds, running_builds_lock, pipeline_iid, project_name, branch, user_name, start_time, detail_url, route_name, commit_url, app_logger, chat_id=None):
+def _record_running_build(running_builds, running_builds_lock, pipeline_iid, project_name, branch, user_name, start_time, detail_url, route_name, commit_url, app_logger, chat_id=None, project_id=None):
+    """记录运行中的构建到 running_builds。
+
+    使用 project_id + pipeline_iid 组合作为 key（build_key），避免不同项目
+    因 pipeline_iid 重复而互相覆盖卡片信息。
+    """
     if running_builds is not None and running_builds_lock is not None:
         from datetime import datetime
         from logger.context import request_id_var
         try:
+            build_key = make_build_key(project_id, pipeline_iid)
+            callback_id = make_callback_id(project_id, pipeline_iid)
             with running_builds_lock:
-                existing = running_builds.get(pipeline_iid, {})
-                running_builds[pipeline_iid] = {
+                existing = running_builds.get(build_key, {})
+                running_builds[build_key] = {
                     'pipeline_iid': pipeline_iid,
+                    'project_id': project_id,
+                    'build_key': build_key,
                     'project_name': project_name,
                     'branch': branch,
                     'user_name': user_name,
@@ -311,26 +321,28 @@ def _record_running_build(running_builds, running_builds_lock, pipeline_iid, pro
                     'commit_url': commit_url,
                     'chat_id': chat_id,
                     'message_id': existing.get('message_id'),
-                    'callback_id': f"pipeline_{pipeline_iid}",
+                    'callback_id': callback_id,
                     'req_id': request_id_var.get(''),  # 透传请求 ID，用于 build_monitor 链路日志
                 }
         except Exception as e:
-            app_logger.error(f"message | record_running_build_failed | pipeline_iid={pipeline_iid}, error={e}")
+            app_logger.error(f"message | record_running_build_failed | pipeline_iid={pipeline_iid}, project_id={project_id}, error={e}")
     else:
         app_logger.warning("message | record_running_build_skipped | reason=running_builds_unavailable")
 
 
-def _remove_completed_build(running_builds, running_builds_lock, pipeline_iid, app_logger):
+def _remove_completed_build(running_builds, running_builds_lock, pipeline_iid, app_logger, project_id=None):
     """
-    从running_builds中移除已完成的构建
+    从running_builds中移除已完成的构建。
+    使用 project_id + pipeline_iid 组合作为 key，避免跨项目误删。
     """
     if running_builds and running_builds_lock:
         try:
+            build_key = make_build_key(project_id, pipeline_iid)
             # 移除已完成构建
             with running_builds_lock:
-                if pipeline_iid in running_builds:
-                    del running_builds[pipeline_iid]
-                    app_logger.info(f"message | remove_completed_build | pipeline_iid={pipeline_iid}")
+                if build_key in running_builds:
+                    del running_builds[build_key]
+                    app_logger.info(f"message | remove_completed_build | pipeline_iid={pipeline_iid}, project_id={project_id}")
         except Exception as e:
             app_logger.error(f"message | remove_completed_build_failed | error={e}")
 
@@ -640,6 +652,8 @@ def format_message(payload, running_builds=None, running_builds_lock=None, route
     detail_url = payload['object_attributes']['url']
     commit_title = payload.get('commit', {}).get('title', 'unknown')
     project_name = payload.get('project', {}).get('name', 'unknown')
+    # 提取 project_id 用于隔离不同项目的 pipeline_iid（不同项目 pipeline_iid 会重复）
+    project_id = payload.get('project', {}).get('id')
     # 安全获取builds_name，避免列表索引超出范围
     builds_name = payload['builds'][0]['name'] if payload.get('builds') and len(payload['builds']) > 0 else "unknown"
     source = payload['object_attributes']['source']
@@ -683,7 +697,7 @@ def format_message(payload, running_builds=None, running_builds_lock=None, route
         
         # 记录运行中的构建
         chat_id = ROUTE_CHAT_ID_MAP.get(route_name)
-        _record_running_build(running_builds, running_builds_lock, pipeline_iid, project_name, branch, user_name, start_time, detail_url, route_name, commit_url, app_logger, chat_id=chat_id)
+        _record_running_build(running_builds, running_builds_lock, pipeline_iid, project_name, branch, user_name, start_time, detail_url, route_name, commit_url, app_logger, chat_id=chat_id, project_id=project_id)
 
         # 构建消息配置
         message_config = {
@@ -705,18 +719,19 @@ def format_message(payload, running_builds=None, running_builds_lock=None, route
     elif status in ['success', 'failed', 'canceled']:
         # success/failed 时移除记录；canceled 时标记为已取消（供重新运行复用 message_id，但不再监控超时）
         if status != 'canceled':
-            _remove_completed_build(running_builds, running_builds_lock, pipeline_iid, app_logger)
+            _remove_completed_build(running_builds, running_builds_lock, pipeline_iid, app_logger, project_id=project_id)
         else:
             # canceled 时标记状态，build_monitor 将跳过监控
             if running_builds and running_builds_lock:
                 try:
+                    build_key = make_build_key(project_id, pipeline_iid)
                     with running_builds_lock:
-                        if pipeline_iid in running_builds:
-                            running_builds[pipeline_iid]['status'] = 'canceled'
-                            running_builds[pipeline_iid]['canceled_time'] = datetime.now()
-                            app_logger.info(f"message | mark_canceled | pipeline_iid={pipeline_iid}")
+                        if build_key in running_builds:
+                            running_builds[build_key]['status'] = 'canceled'
+                            running_builds[build_key]['canceled_time'] = datetime.now()
+                            app_logger.info(f"message | mark_canceled | pipeline_iid={pipeline_iid}, project_id={project_id}")
                 except Exception as e:
-                    app_logger.error(f"message | mark_canceled_failed | pipeline_iid={pipeline_iid}, error={e}")
+                    app_logger.error(f"message | mark_canceled_failed | pipeline_iid={pipeline_iid}, project_id={project_id}, error={e}")
 
         # canceled 状态生成取消卡片，更新已有卡片显示
         if status == 'canceled':
@@ -839,10 +854,10 @@ def format_message(payload, running_builds=None, running_builds_lock=None, route
             subtitle += f"，部署设备：{deploy_ip}"
             app_logger.info(f"message | format_message | subtitle={subtitle}")
         
-        # 生成并返回消息
-        callback_id = f"pipeline_{pipeline_iid}" if status == 'failed' else None
+        # 生成并返回消息，使用项目维度隔离的 callback_id 避免跨项目卡片冲突
+        callback_id = make_callback_id(project_id, pipeline_iid) if status == 'failed' else None
         message = _build_message(project_name, subtitle, detail_url, message_config, text_tag_list, callback_id=callback_id)
-        app_logger.info(f"message | format_output | project={project_name}, pipeline_iid={pipeline_iid}, status={status}")
+        app_logger.info(f"message | format_output | project={project_name}, pipeline_iid={pipeline_iid}, project_id={project_id}, status={status}")
         return message
 
     return None

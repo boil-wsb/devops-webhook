@@ -174,3 +174,4 @@ workorder/
 # Local binaries (docker, mc, etc.) - keep README but ignore executables
 bin/*
 !bin/README.md
+*.zip

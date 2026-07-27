@@ -1,4 +1,4 @@
-import time
+﻿import time
 from datetime import datetime
 import threading
 from concurrent.futures import ThreadPoolExecutor
@@ -49,7 +49,8 @@ def send_long_build_alert(build_info, route_name):
         }.get(alert_level, '构建超时告警')
 
         # callback_id 同时作为 open_message_id，首次生成，后续沿用用于更新原卡片
-        callback_id = existing_callback_id or f"build_timeout_{build_info['pipeline_iid']}"
+        build_key = build_info.get('build_key') or build_info.get('pipeline_iid')
+        callback_id = existing_callback_id or f"build_timeout_{build_key}"
 
         long_build_message = {
             "msg_type": "interactive",
@@ -141,10 +142,10 @@ def check_long_running_builds(running_builds, running_builds_lock):
                 build_count = len(running_builds)
                 if build_count > 0:
                     app_logger.debug(f"build_monitor | check | running_count={build_count}")
-                    for pipeline_iid, build_info in running_builds.items():
+                    for build_key, build_info in running_builds.items():
                         # 跳过已取消的构建
                         if build_info.get('status') == 'canceled':
-                            app_logger.debug(f"build_monitor | skip_canceled | pipeline_iid={pipeline_iid}")
+                            app_logger.debug(f"build_monitor | skip_canceled | build_key={build_key}")
                             continue
 
                         elapsed_time = (current_time - build_info['start_time']).total_seconds()
@@ -170,40 +171,40 @@ def check_long_running_builds(running_builds, running_builds_lock):
                                 build_info['alerted_levels'] = alerted_levels
                                 build_info['alert_level'] = alert_level
                                 # 拷贝 build_info 避免锁外读取时被其他线程修改
-                                builds_to_alert.append((pipeline_iid, dict(build_info)))
-                                app_logger.warning(f"build_monitor | timeout_alert | pipeline_iid={pipeline_iid}, level={alert_level}")
+                                builds_to_alert.append((build_key, dict(build_info)))
+                                app_logger.warning(f"build_monitor | timeout_alert | build_key={build_key}, level={alert_level}")
                             else:
-                                app_logger.debug(f"build_monitor | check_build | pipeline_iid={pipeline_iid}, elapsed={elapsed_time}, timeout={timeout_seconds}")
+                                app_logger.debug(f"build_monitor | check_build | build_key={build_key}, elapsed={elapsed_time}, timeout={timeout_seconds}")
 
             # P1 修复: 锁外用线程池并行发送告警，避免阻塞监控循环
             if builds_to_alert:
                 def _send_single(item):
-                    iid, info = item
+                    build_key, info = item
                     try:
                         route_name = info.get('route_name', '')
                         send_long_build_alert(info, route_name)
                         # 返回 info 中可能被回写的 callback_id（作为后续更新的 open_message_id）
-                        return iid, True, None, info.get('alert_callback_id')
+                        return build_key, True, None, info.get('alert_callback_id')
                     except Exception as e:
-                        return iid, False, e, None
+                        return build_key, False, e, None
 
                 with ThreadPoolExecutor(max_workers=3) as pool:
                     results = list(pool.map(_send_single, builds_to_alert))
 
-                for iid, success, err, cb_id in results:
+                for build_key, success, err, cb_id in results:
                     if success:
-                        app_logger.info(f"build_monitor | alert_sent | pipeline_iid={iid}")
+                        app_logger.info(f"build_monitor | alert_sent | build_key={build_key}")
                         # 回写 callback_id 到原 running_builds，供后续升级告警作为 open_message_id 复用
                         if cb_id:
                             with running_builds_lock:
-                                if iid in running_builds:
-                                    running_builds[iid]['alert_callback_id'] = cb_id
+                                if build_key in running_builds:
+                                    running_builds[build_key]['alert_callback_id'] = cb_id
                     else:
-                        app_logger.error(f"build_monitor | alert_failed | pipeline_iid={iid}, error={err}")
+                        app_logger.error(f"build_monitor | alert_failed | build_key={build_key}, error={err}")
                         # 告警失败：从 alerted_levels 移除该级别，下次循环重试
                         with running_builds_lock:
-                            if iid in running_builds:
-                                info = running_builds[iid]
+                            if build_key in running_builds:
+                                info = running_builds[build_key]
                                 lvl = info.get('alert_level')
                                 if lvl and 'alerted_levels' in info:
                                     info['alerted_levels'].discard(lvl)
