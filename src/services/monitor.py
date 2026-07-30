@@ -156,9 +156,9 @@ def send_monitor_message(target_url, message):
             message['alerts'] = unique_alerts
 
         headers = {'Content-Type': 'application/json'}
-        response = requests.post(target_url, headers=headers, data=json.dumps(message))
-
-        success = response.status_code in [200, 201]
+        with requests.post(target_url, headers=headers, data=json.dumps(message)) as response:
+            success = response.status_code in [200, 201]
+            status_code = response.status_code
 
         # P1 修复: 仅在发送成功后才标记去重，失败则下次可重试
         if success and sent_keys:
@@ -170,7 +170,7 @@ def send_monitor_message(target_url, message):
             'timestamp': datetime.now().strftime('%Y-%m-%d %H:%M:%S.%f')[:-3],
             'action': 'send_monitor_message',
             'target_url': target_url,
-            'status_code': response.status_code,
+            'status_code': status_code,
             'success': success
         }
 

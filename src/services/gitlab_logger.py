@@ -41,10 +41,9 @@ def get_job_logs(project_id: int, job_id: int, max_lines: int = 100) -> Tuple[bo
     }
 
     try:
-        response = requests.get(url, headers=headers, timeout=30)
-        response.raise_for_status()
-
-        full_log = response.text
+        with requests.get(url, headers=headers, timeout=30) as response:
+            response.raise_for_status()
+            full_log = response.text
 
         lines = full_log.split('\n')
         if len(lines) > max_lines:
@@ -89,10 +88,9 @@ def get_failed_job_id(pipeline_id: int, project_id: int) -> Tuple[bool, int, str
     }
 
     try:
-        response = requests.get(url, headers=headers, timeout=30)
-        response.raise_for_status()
-
-        jobs = response.json()
+        with requests.get(url, headers=headers, timeout=30) as response:
+            response.raise_for_status()
+            jobs = response.json()
 
         for job in jobs:
             if job.get('status') == 'failed':
@@ -139,10 +137,9 @@ def get_project_id_by_name(project_path_with_namespace: str) -> Tuple[bool, int,
     }
 
     try:
-        response = requests.get(url, headers=headers, timeout=30)
-        response.raise_for_status()
-
-        project_data = response.json()
+        with requests.get(url, headers=headers, timeout=30) as response:
+            response.raise_for_status()
+            project_data = response.json()
         project_id = project_data.get('id')
 
         if project_id:

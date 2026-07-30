@@ -4,6 +4,9 @@ import logging
 
 logger = logging.getLogger('app_logger')
 
+# mtime 缓存：避免每次调用都读磁盘+解析 YAML（参考 trigger_action._load_trigger_actions）
+_config_cache = {'config': None, 'mtime': 0}
+
 
 def _find_config_path(config_file='config.yaml'):
     base_dir = os.path.dirname(os.path.abspath(__file__))
@@ -19,6 +22,15 @@ def get_config(config_file='config.yaml'):
         raise FileNotFoundError(f"配置文件不存在: {config_path}")
 
     try:
+        mtime = os.path.getmtime(config_path)
+    except OSError:
+        mtime = 0
+
+    # mtime 缓存命中，直接返回缓存（支持热更新：文件修改后 mtime 变化自动重载）
+    if _config_cache['config'] is not None and _config_cache['mtime'] == mtime:
+        return _config_cache['config']
+
+    try:
         with open(config_path, 'r', encoding='utf-8') as f:
             config = yaml.safe_load(f)
     except yaml.YAMLError as e:
@@ -29,6 +41,8 @@ def get_config(config_file='config.yaml'):
         logger.error(f"配置文件格式无效 [{config_path}]: 期望非空字典")
         raise ValueError(f"配置文件格式无效: {config_path}")
 
+    _config_cache['config'] = config
+    _config_cache['mtime'] = mtime
     return config
 
 

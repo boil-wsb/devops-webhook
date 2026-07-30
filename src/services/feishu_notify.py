@@ -21,9 +21,9 @@ def _get_notify_config():
 def _login(base_url, username, password):
     url = f"{base_url.rstrip('/')}/api/v1/auth/login"
     try:
-        resp = requests.post(url, json={"username": username, "password": password}, timeout=10)
-        resp.raise_for_status()
-        data = resp.json()
+        with requests.post(url, json={"username": username, "password": password}, timeout=10) as resp:
+            resp.raise_for_status()
+            data = resp.json()
         return data.get('access_token')
     except Exception as e:
         logger.error(f"feishu_notify | login_failed | error={e}")
@@ -111,17 +111,17 @@ def get_user_open_id(user_name):
     lookup_url = f"{base_url.rstrip('/')}/api/v1/open-id"
 
     try:
-        resp = requests.get(lookup_url, params=payload, headers=headers, timeout=10)
-        if resp.status_code == 404:
-            logger.info(f"feishu_notify | get_open_id | user={user_name}, api_status=404, fallback=records")
-            return _get_open_id_from_records(user_name, base_url, headers)
+        with requests.get(lookup_url, params=payload, headers=headers, timeout=10) as resp:
+            if resp.status_code == 404:
+                logger.info(f"feishu_notify | get_open_id | user={user_name}, api_status=404, fallback=records")
+                return _get_open_id_from_records(user_name, base_url, headers)
 
-        if resp.status_code == 422:
-            logger.warning(f"feishu_notify | get_open_id | user={user_name}, api_status=422, fallback=records")
-            return _get_open_id_from_records(user_name, base_url, headers)
+            if resp.status_code == 422:
+                logger.warning(f"feishu_notify | get_open_id | user={user_name}, api_status=422, fallback=records")
+                return _get_open_id_from_records(user_name, base_url, headers)
 
-        resp.raise_for_status()
-        result = resp.json()
+            resp.raise_for_status()
+            result = resp.json()
         open_id = result.get('feishu_open_id') or result.get('feishuOpenId')
         items = result.get('items', [])
         if not open_id and items:
@@ -140,13 +140,13 @@ def get_user_open_id(user_name):
         new_token = _refresh_token_on_401(e, headers)
         if new_token:
             try:
-                resp = requests.get(lookup_url, params=payload, headers=headers, timeout=10)
-                if resp.status_code == 404:
-                    return _get_open_id_from_records(user_name, base_url, headers)
-                if resp.status_code == 422:
-                    return _get_open_id_from_records(user_name, base_url, headers)
-                resp.raise_for_status()
-                result = resp.json()
+                with requests.get(lookup_url, params=payload, headers=headers, timeout=10) as resp:
+                    if resp.status_code == 404:
+                        return _get_open_id_from_records(user_name, base_url, headers)
+                    if resp.status_code == 422:
+                        return _get_open_id_from_records(user_name, base_url, headers)
+                    resp.raise_for_status()
+                    result = resp.json()
                 open_id = result.get('feishu_open_id') or result.get('feishuOpenId')
                 items = result.get('items', [])
                 if not open_id and items:
@@ -175,12 +175,18 @@ def _get_open_id_from_records(user_name, base_url, headers):
     params = {"user": user_name.strip(), "page_size": 10, "page": 1}
 
     try:
-        resp = requests.get(records_url, params=params, headers=headers, timeout=10)
-        if resp.status_code == 422:
+        result = None
+        with requests.get(records_url, params=params, headers=headers, timeout=10) as resp:
+            if resp.status_code == 422:
+                pass  # 下面用简化参数重试
+            else:
+                resp.raise_for_status()
+                result = resp.json()
+        if result is None:
             params = {"user": user_name.strip()}
-            resp = requests.get(records_url, params=params, headers=headers, timeout=10)
-        resp.raise_for_status()
-        result = resp.json()
+            with requests.get(records_url, params=params, headers=headers, timeout=10) as resp:
+                resp.raise_for_status()
+                result = resp.json()
         items = result.get('items', [])
         for item in items:
             open_id = item.get('feishu_open_id')
@@ -271,9 +277,9 @@ def send_action_result(action_name, project_name, ref, success, output='', error
     notify_url = f"{base_url.rstrip('/')}/api/v1/feishu/notify"
 
     try:
-        resp = requests.post(notify_url, json=payload, headers=headers, timeout=40)
-        resp.raise_for_status()
-        result = resp.json()
+        with requests.post(notify_url, json=payload, headers=headers, timeout=40) as resp:
+            resp.raise_for_status()
+            result = resp.json()
         if result.get('success'):
             target = f"chat_id={chat_id}" if has_chat_id else f"user={notify_user}"
             logger.info(f"feishu_notify | action_sent | action={action_name}, target={target}")
@@ -283,9 +289,9 @@ def send_action_result(action_name, project_name, ref, success, output='', error
         new_token = _refresh_token_on_401(e, headers)
         if new_token:
             try:
-                resp = requests.post(notify_url, json=payload, headers=headers, timeout=40)
-                resp.raise_for_status()
-                result = resp.json()
+                with requests.post(notify_url, json=payload, headers=headers, timeout=40) as resp:
+                    resp.raise_for_status()
+                    result = resp.json()
                 if result.get('success'):
                     logger.info(f"feishu_notify | action_send_retry | action={action_name}, success=true")
                 else:
@@ -337,9 +343,9 @@ def send_card_via_api(card_content, chat_id=None, notify_user=None, callback_id=
     notify_url = f"{base_url.rstrip('/')}/api/v1/feishu/notify"
 
     try:
-        resp = requests.post(notify_url, json=payload, headers=headers, timeout=40)
-        resp.raise_for_status()
-        result = resp.json()
+        with requests.post(notify_url, json=payload, headers=headers, timeout=40) as resp:
+            resp.raise_for_status()
+            result = resp.json()
         if result.get('success'):
             target = f"chat_id={chat_id}" if has_chat_id else f"user={notify_user}"
             logger.info(f"feishu_notify | card_sent | target={target}, message_id={result.get('message_id')}")
@@ -351,9 +357,9 @@ def send_card_via_api(card_content, chat_id=None, notify_user=None, callback_id=
         new_token = _refresh_token_on_401(e, headers)
         if new_token:
             try:
-                resp = requests.post(notify_url, json=payload, headers=headers, timeout=40)
-                resp.raise_for_status()
-                result = resp.json()
+                with requests.post(notify_url, json=payload, headers=headers, timeout=40) as resp:
+                    resp.raise_for_status()
+                    result = resp.json()
                 if result.get('success'):
                     logger.info("feishu_notify | card_send_retry | success=true")
                     return result
@@ -406,9 +412,9 @@ def update_card_via_api(card_content, open_message_id, callback_id):
     update_url = f"{base_url.rstrip('/')}/api/v1/feishu/notify-by-open-id/{open_message_id}"
 
     try:
-        resp = requests.patch(update_url, json=payload, headers=headers, timeout=40)
-        resp.raise_for_status()
-        result = resp.json()
+        with requests.patch(update_url, json=payload, headers=headers, timeout=40) as resp:
+            resp.raise_for_status()
+            result = resp.json()
         if result.get('success'):
             logger.info(f"feishu_notify | card_updated | open_message_id={open_message_id}, message_id={result.get('message_id')}")
             return result
@@ -419,9 +425,9 @@ def update_card_via_api(card_content, open_message_id, callback_id):
         new_token = _refresh_token_on_401(e, headers)
         if new_token:
             try:
-                resp = requests.patch(update_url, json=payload, headers=headers, timeout=40)
-                resp.raise_for_status()
-                result = resp.json()
+                with requests.patch(update_url, json=payload, headers=headers, timeout=40) as resp:
+                    resp.raise_for_status()
+                    result = resp.json()
                 if result.get('success'):
                     logger.info(f"feishu_notify | card_update_retry | success=true, open_message_id={open_message_id}")
                     return result

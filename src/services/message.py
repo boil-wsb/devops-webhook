@@ -9,9 +9,9 @@ from src.config import WEBHOOK_CONFIG, DEFAULT_TARGET_URL, ROUTE_CHAT_ID_MAP
 
 def send_formatted_message(target_url, message):
     headers = {'Content-Type': 'application/json'}
-    response = requests.post(target_url, headers=headers, data=json.dumps(message))
-    if response.status_code not in [200, 201]:
-        raise Exception(f"Failed to send message. Status code: {response.status_code}, Response: {response.text}")
+    with requests.post(target_url, headers=headers, data=json.dumps(message)) as response:
+        if response.status_code not in [200, 201]:
+            raise Exception(f"Failed to send message. Status code: {response.status_code}, Response: {response.text}")
     return True
 
 
