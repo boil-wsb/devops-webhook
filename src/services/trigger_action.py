@@ -554,7 +554,7 @@ def _record_history(action_name, project_name, ref, success, output, error_outpu
     # 异步写入数据库（不阻塞通知流程）
     def _db_write():
         try:
-            from src.services.database import TriggerActionHistoryDB
+            from src.services.database import TriggerActionHistoryDB, close_thread_connection
             TriggerActionHistoryDB.insert(
                 action_name=action_name,
                 project_name=project_name,
@@ -573,6 +573,8 @@ def _record_history(action_name, project_name, ref, success, output, error_outpu
             logger.info(f"trigger_action | history_db_written | action={action_name}, success={success}, duration={round(duration, 1)}s")
         except Exception as e:
             logger.error(f"trigger_action | db_record_failed | action={action_name}, error={e}")
+        finally:
+            close_thread_connection()
     
     db_thread = threading.Thread(target=_db_write, daemon=True)
     db_thread.start()
@@ -688,14 +690,18 @@ def manual_trigger(action_name, ref='', pipeline_iid=None):
     projectcode = ref_projectcodes.get(ref, '') if ref_projectcodes else ''
 
     def _wrapped():
-        _start = datetime.now()
-        if projectcode:
-            lock = _get_projectcode_exec_lock(projectcode)
-            with lock:
-                logger.info(f"trigger_action | projectcode_lock_acquired | action={action.get('name')}, projectcode={projectcode}, ref={ref}, source=manual")
+        from src.services.database import close_thread_connection
+        try:
+            _start = datetime.now()
+            if projectcode:
+                lock = _get_projectcode_exec_lock(projectcode)
+                with lock:
+                    logger.info(f"trigger_action | projectcode_lock_acquired | action={action.get('name')}, projectcode={projectcode}, ref={ref}, source=manual")
+                    target(action, path_with_namespace, ref, project_name, pipeline_iid, trigger_source='manual', start_time=_start)
+            else:
                 target(action, path_with_namespace, ref, project_name, pipeline_iid, trigger_source='manual', start_time=_start)
-        else:
-            target(action, path_with_namespace, ref, project_name, pipeline_iid, trigger_source='manual', start_time=_start)
+        finally:
+            close_thread_connection()
 
     thread = threading.Thread(target=_wrapped, daemon=True)
     thread.start()
@@ -730,13 +736,17 @@ def check_and_trigger(path_with_namespace, ref, project_name='', pipeline_iid=No
 
         def _run_task(action=action, ref=ref, project_name=project_name,
                       pipeline_iid=pipeline_iid, projectcode=projectcode):
-            if projectcode:
-                lock = _get_projectcode_exec_lock(projectcode)
-                with lock:
-                    logger.info(f"trigger_action | projectcode_lock_acquired | action={action.get('name')}, projectcode={projectcode}, ref={ref}")
+            from src.services.database import close_thread_connection
+            try:
+                if projectcode:
+                    lock = _get_projectcode_exec_lock(projectcode)
+                    with lock:
+                        logger.info(f"trigger_action | projectcode_lock_acquired | action={action.get('name')}, projectcode={projectcode}, ref={ref}")
+                        target(action, path_with_namespace, ref, project_name, pipeline_iid)
+                else:
                     target(action, path_with_namespace, ref, project_name, pipeline_iid)
-            else:
-                target(action, path_with_namespace, ref, project_name, pipeline_iid)
+            finally:
+                close_thread_connection()
 
         thread = threading.Thread(target=_run_task, daemon=True)
         thread.start()

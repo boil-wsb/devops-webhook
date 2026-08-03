@@ -44,6 +44,22 @@ def close_all_connections():
     app_logger.info("database | all_connections_closed")
 
 
+def close_thread_connection():
+    """关闭当前线程的数据库连接（在线程/请求结束时调用，防止 fd 泄漏）
+
+    Flask dev server 每个请求创建新线程，threading.local() 的 SQLite 连接
+    不会在线程退出时自动 close()，需显式关闭释放 fd（db + wal + shm = 3 fd）。
+    """
+    conn = getattr(_connection_local, 'connection', None)
+    if conn is not None:
+        try:
+            conn.close()
+        except Exception:
+            pass
+        _unregister_connection(conn)
+        del _connection_local.connection
+
+
 def _register_atexit():
     """注册进程退出时的清理函数"""
     global _shutdown_registered

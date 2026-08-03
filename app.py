@@ -12,6 +12,12 @@ app = Flask(__name__, static_folder='static')
 # 注册所有路由
 register_routes(app)
 
+# 请求结束后关闭线程本地 DB 连接，防止 Flask threaded 模式下 SQLite fd 泄漏
+@app.teardown_appcontext
+def _close_db_connection(exception=None):
+    from src.services.database import close_thread_connection
+    close_thread_connection()
+
 # 添加HTTP访问日志记录器
 @app.after_request
 def log_access(response):

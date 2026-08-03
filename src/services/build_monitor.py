@@ -1,4 +1,4 @@
-﻿import time
+import time
 from datetime import datetime
 import threading
 from concurrent.futures import ThreadPoolExecutor
@@ -187,6 +187,9 @@ def check_long_running_builds(running_builds, running_builds_lock):
                         return build_key, True, None, info.get('alert_callback_id')
                     except Exception as e:
                         return build_key, False, e, None
+                    finally:
+                        from src.services.database import close_thread_connection
+                        close_thread_connection()
 
                 with ThreadPoolExecutor(max_workers=3) as pool:
                     results = list(pool.map(_send_single, builds_to_alert))
