@@ -204,7 +204,7 @@ def _get_open_id_from_records(user_name, base_url, headers):
         return None
 
 
-def send_action_result(action_name, project_name, ref, success, output='', error_output='', exit_code=None, ssh_host='', variables=None):
+def send_action_result(action_name, project_name, ref, success, output='', error_output='', exit_code=None, ssh_host='', variables=None, notify_route=''):
     config = _get_notify_config()
     if not config:
         return
@@ -217,6 +217,15 @@ def send_action_result(action_name, project_name, ref, success, output='', error
     if not base_url:
         logger.error("feishu_notify | config_incomplete | missing=api_base_url")
         return
+
+    # 若 action 配置了 notify_route，优先从 route_chat_id_map 解析对应的 chat_id 覆盖默认
+    if notify_route and notify_route.strip():
+        route_chat_id = (config.get('route_chat_id_map', {}) or {}).get(notify_route.strip(), '')
+        if route_chat_id and route_chat_id.strip():
+            chat_id = route_chat_id.strip()
+            logger.info(f"feishu_notify | route_chat_id | action={action_name}, notify_route={notify_route}, chat_id={chat_id}")
+        else:
+            logger.warning(f"feishu_notify | route_chat_id_missing | action={action_name}, notify_route={notify_route}, fallback=default")
 
     has_chat_id = bool(chat_id and chat_id.strip())
     has_user = bool(notify_user and notify_user.strip())

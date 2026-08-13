@@ -1449,6 +1449,14 @@
                        </div>`
                     : '';
 
+                // notify_route 显示（自定义通知群聊）
+                const notifyRouteHtml = action.notify_route
+                    ? `<div class="action-field">
+                        <span class="action-field-label">通知群聊:</span>
+                        <span class="action-field-value">${escapeHtml(action.notify_route)}</span>
+                       </div>`
+                    : '';
+
                 return `
                     <div class="action-card" style="animation-delay: ${index * 0.05}s;">
                         <div class="action-card-header">
@@ -1471,6 +1479,7 @@
                             <span class="action-field-value">${escapeHtml(action.script || '-')}</span>
                         </div>
                         ${sshHostHtml}
+                        ${notifyRouteHtml}
                         <div class="action-field">
                             <span class="action-field-label">变量键:</span>
                             <div class="var-keys">${varKeysHtml}</div>

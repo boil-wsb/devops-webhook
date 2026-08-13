@@ -250,6 +250,7 @@ def _execute_local(action, path_with_namespace, ref, project_name, pipeline_iid=
     name = action.get('name', 'unknown')
     script_name = action.get('script', '')
     variables = action.get('variables', {})
+    notify_route = action.get('notify_route', '')
 
     # per-action 超时覆盖（秒）
     try:
@@ -382,17 +383,17 @@ def _execute_local(action, path_with_namespace, ref, project_name, pipeline_iid=
                 error_msg = f'{error_msg}\nstderr_tail: {partial_err}'
             if partial_out:
                 error_msg = f'{error_msg}\nstdout_tail: {partial_out}'
-            _notify_result(name, project_name, ref, False, partial_out, error_msg, None, 'local', variables, trigger_source, pipeline_iid, start_time)
+            _notify_result(name, project_name, ref, False, partial_out, error_msg, None, 'local', variables, trigger_source, pipeline_iid, start_time, notify_route)
         else:
             success = proc.returncode == 0
             if success:
                 logger.info(f"trigger_action | local_result | action={name}, script={script_name}, exit_code={proc.returncode}, elapsed={elapsed}s, stdout_len={len(output.strip())}, stderr_len={len(error_output.strip())}")
             else:
                 logger.error(f"trigger_action | local_result | action={name}, script={script_name}, exit_code={proc.returncode}, elapsed={elapsed}s, stderr_len={len(error_output.strip())}, stdout_tail={output.strip()[-500:]!r}")
-            _notify_result(name, project_name, ref, success, output, error_output, proc.returncode, 'local', variables, trigger_source, pipeline_iid, start_time)
+            _notify_result(name, project_name, ref, success, output, error_output, proc.returncode, 'local', variables, trigger_source, pipeline_iid, start_time, notify_route)
     except Exception as e:
         logger.error(f"trigger_action | local_result | action={name}, script={script_name}, result=exception, error={e}")
-        _notify_result(name, project_name, ref, False, '', str(e), None, 'local', variables, trigger_source, pipeline_iid, start_time)
+        _notify_result(name, project_name, ref, False, '', str(e), None, 'local', variables, trigger_source, pipeline_iid, start_time, notify_route)
 
 
 def _execute_ssh(action, path_with_namespace, ref, project_name, pipeline_iid=None, trigger_source='auto', start_time=None):
@@ -408,6 +409,7 @@ def _execute_ssh(action, path_with_namespace, ref, project_name, pipeline_iid=No
     script_name = action.get('script', '')
     ssh_command = action.get('ssh_command', '')
     variables = action.get('variables', {})
+    notify_route = action.get('notify_route', '')
 
     # per-action 超时覆盖（秒）
     try:
@@ -476,7 +478,7 @@ def _execute_ssh(action, path_with_namespace, ref, project_name, pipeline_iid=No
             if script_name:
                 client.exec_command(f"rm -f {remote_script}")
 
-        _notify_result(name, project_name, ref, success, output, error_output, exit_code, host, variables, trigger_source, pipeline_iid, start_time)
+        _notify_result(name, project_name, ref, success, output, error_output, exit_code, host, variables, trigger_source, pipeline_iid, start_time, notify_route)
     except socket.timeout:
         heartbeat_stop.set()
         # 远程执行超时（channel 无数据流动超过 timeout 秒）
@@ -486,30 +488,30 @@ def _execute_ssh(action, path_with_namespace, ref, project_name, pipeline_iid=No
                 client.exec_command(f"rm -f {remote_script}")
             except Exception:
                 pass
-        _notify_result(name, project_name, ref, False, '', f'SSH 远程执行超时({timeout}s)', None, host, variables, trigger_source, pipeline_iid, start_time)
+        _notify_result(name, project_name, ref, False, '', f'SSH 远程执行超时({timeout}s)', None, host, variables, trigger_source, pipeline_iid, start_time, notify_route)
     except paramiko.AuthenticationException:
         logger.error(f"trigger_action | ssh_result | action={name}, host={host}:{port}, result=auth_failed")
-        _notify_result(name, project_name, ref, False, '', f'SSH 认证失败: {user}@{host}:{port}', None, host, variables, trigger_source, pipeline_iid, start_time)
+        _notify_result(name, project_name, ref, False, '', f'SSH 认证失败: {user}@{host}:{port}', None, host, variables, trigger_source, pipeline_iid, start_time, notify_route)
     except paramiko.SSHException as e:
         logger.error(f"trigger_action | ssh_result | action={name}, host={host}, result=ssh_exception, error={e}")
-        _notify_result(name, project_name, ref, False, '', f'SSH 连接异常: {e}', None, host, variables, trigger_source, pipeline_iid, start_time)
+        _notify_result(name, project_name, ref, False, '', f'SSH 连接异常: {e}', None, host, variables, trigger_source, pipeline_iid, start_time, notify_route)
     except Exception as e:
         logger.error(f"trigger_action | ssh_result | action={name}, host={host}, result=exception, error={e}")
-        _notify_result(name, project_name, ref, False, '', str(e), None, host, variables, trigger_source, pipeline_iid, start_time)
+        _notify_result(name, project_name, ref, False, '', str(e), None, host, variables, trigger_source, pipeline_iid, start_time, notify_route)
     finally:
         client.close()
 
 
-def _notify_result(action_name, project_name, ref, success, output='', error_output='', exit_code=None, ssh_host='', variables=None, trigger_source='auto', pipeline_iid=None, start_time=None):
+def _notify_result(action_name, project_name, ref, success, output='', error_output='', exit_code=None, ssh_host='', variables=None, trigger_source='auto', pipeline_iid=None, start_time=None, notify_route=''):
     elapsed = round((datetime.now() - start_time).total_seconds(), 1) if start_time else 0
     location = ssh_host or 'local'
-    logger.info(f"trigger_action | notify_start | action={action_name}, success={success}, exit_code={exit_code}, location={location}, elapsed={elapsed}s")
+    logger.info(f"trigger_action | notify_start | action={action_name}, success={success}, exit_code={exit_code}, location={location}, notify_route={notify_route or 'default'}, elapsed={elapsed}s")
     # 记录执行历史（持久化到数据库 + 内存缓存）
     _record_history(action_name, project_name, ref, success, output, error_output, exit_code, ssh_host, trigger_source, pipeline_iid, start_time)
     try:
         from src.services.feishu_notify import send_action_result
-        send_action_result(action_name, project_name, ref, success, output, error_output, exit_code, ssh_host, variables)
-        logger.info(f"trigger_action | notify_done | action={action_name}, success={success}, location={location}")
+        send_action_result(action_name, project_name, ref, success, output, error_output, exit_code, ssh_host, variables, notify_route)
+        logger.info(f"trigger_action | notify_done | action={action_name}, success={success}, location={location}, notify_route={notify_route or 'default'}")
     except Exception as e:
         logger.error(f"trigger_action | notify_failed | action={action_name}, error={e}")
 
@@ -596,6 +598,7 @@ def get_trigger_actions_config():
             'workorder': action.get('workorder', False),
             'image_type': action.get('image_type', ''),
             'ref_projectcodes': action.get('ref_projectcodes', {}),
+            'notify_route': action.get('notify_route', ''),
             'variables_keys': list(action.get('variables', {}).keys()) if action.get('variables') else [],
         })
     return result
