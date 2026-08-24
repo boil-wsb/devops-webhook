@@ -23,6 +23,9 @@ _trigger_history_cache = []
 _trigger_history_lock = threading.Lock()
 _TRIGGER_HISTORY_CACHE_MAX = 200
 
+# 历史列表接口返回的日志摘要长度（完整日志通过详情接口获取）
+_HISTORY_OUTPUT_SUMMARY_MAX = 2000
+
 
 def _strip_ref_prefix(ref):
     for prefix in ('refs/heads/', 'refs/tags/', 'refs/remotes/'):
@@ -540,8 +543,8 @@ def _record_history(action_name, project_name, ref, success, output, error_outpu
         'start_time': start_time.strftime('%Y-%m-%d %H:%M:%S') if start_time else '',
         'end_time': end_time.strftime('%Y-%m-%d %H:%M:%S'),
         'duration': round(duration, 1),
-        'output_tail': (output or '').strip()[-500:] if output else '',
-        'error_tail': (error_output or '').strip()[-500:] if error_output else '',
+        'output_tail': (output or '').strip() if output else '',
+        'error_tail': (error_output or '').strip() if error_output else '',
         'ssh_host': ssh_host or 'local',
         'trigger_source': trigger_source,
     }
@@ -557,7 +560,7 @@ def _record_history(action_name, project_name, ref, success, output, error_outpu
     def _db_write():
         try:
             from src.services.database import TriggerActionHistoryDB, close_thread_connection
-            TriggerActionHistoryDB.insert(
+            row_id = TriggerActionHistoryDB.insert(
                 action_name=action_name,
                 project_name=project_name,
                 ref=ref,
@@ -572,6 +575,9 @@ def _record_history(action_name, project_name, ref, success, output, error_outpu
                 ssh_host=ssh_host or 'local',
                 trigger_source=trigger_source,
             )
+            # 回填数据库自增 id，便于详情接口按 id 查询（含内存缓存降级场景）
+            if row_id:
+                record['id'] = row_id
             logger.info(f"trigger_action | history_db_written | action={action_name}, success={success}, duration={round(duration, 1)}s")
         except Exception as e:
             logger.error(f"trigger_action | db_record_failed | action={action_name}, error={e}")
@@ -604,18 +610,41 @@ def get_trigger_actions_config():
     return result
 
 
+def _log_summary(text):
+    """截取日志末尾 _HISTORY_OUTPUT_SUMMARY_MAX 字符作为列表摘要（完整日志走详情接口）"""
+    text = (text or '').strip()
+    if len(text) > _HISTORY_OUTPUT_SUMMARY_MAX:
+        return text[-_HISTORY_OUTPUT_SUMMARY_MAX:]
+    return text
+
+
+def _apply_log_summary(record):
+    """对单条历史记录应用日志摘要截断，并标记是否被截断"""
+    record = dict(record) if record else record
+    if record:
+        out = record.get('output_tail')
+        err = record.get('error_tail')
+        record['output_tail'] = _log_summary(out)
+        record['error_tail'] = _log_summary(err)
+        record['output_truncated'] = bool(out and len(out.strip()) > _HISTORY_OUTPUT_SUMMARY_MAX)
+        record['error_truncated'] = bool(err and len(err.strip()) > _HISTORY_OUTPUT_SUMMARY_MAX)
+    return record
+
+
 def get_trigger_history(limit=50, offset=0, action_name=None, project_name=None, success=None):
-    """获取执行历史记录（优先从数据库读取，支持分页和筛选）
-    
+    """获取执行历史记录列表（优先从数据库读取，支持分页和筛选）
+
     Args:
         limit: 每页条数，默认 50
         offset: 偏移量，默认 0
         action_name: 按 action 名称筛选（可选）
         project_name: 按项目名称筛选（可选）
         success: 按执行结果筛选（可选）
-    
+
     Returns:
         dict: 包含 records、pagination 等信息的字典
+        注意：records 中的 output_tail/error_tail 仅为末尾摘要，
+        完整日志通过 get_trigger_history_detail 获取。
     """
     try:
         from src.services.database import TriggerActionHistoryDB
@@ -626,13 +655,15 @@ def get_trigger_history(limit=50, offset=0, action_name=None, project_name=None,
             project_name=project_name,
             success=success
         )
-        
+
         # 如果数据库没有数据（首次运行），返回内存缓存
         if total == 0:
             with _trigger_history_lock:
                 records = _trigger_history_cache[:limit]
                 total = len(_trigger_history_cache)
-        
+
+        records = [_apply_log_summary(r) for r in records]
+
         return {
             'records': records,
             'pagination': {
@@ -647,7 +678,7 @@ def get_trigger_history(limit=50, offset=0, action_name=None, project_name=None,
         # 数据库查询失败时降级到内存缓存
         with _trigger_history_lock:
             return {
-                'records': _trigger_history_cache[:limit],
+                'records': [_apply_log_summary(r) for r in _trigger_history_cache[:limit]],
                 'pagination': {
                     'total': len(_trigger_history_cache),
                     'limit': limit,
@@ -655,6 +686,33 @@ def get_trigger_history(limit=50, offset=0, action_name=None, project_name=None,
                     'has_more': False
                 }
             }
+
+
+def get_trigger_history_detail(record_id):
+    """获取单条执行历史的完整日志（含完整 output_tail/error_tail）
+
+    优先从数据库按 id 查询；数据库无记录或查询失败时降级到内存缓存。
+
+    Returns:
+        dict: {'found': bool, 'record': dict 或 None}
+    """
+    try:
+        from src.services.database import TriggerActionHistoryDB
+        record = TriggerActionHistoryDB.get_by_id(record_id)
+        if record:
+            record['success'] = bool(record['success'])
+            if record.get('pipeline_iid') is not None:
+                record['pipeline_iid'] = int(record['pipeline_iid'])
+            return {'found': True, 'record': record}
+    except Exception as e:
+        logger.error(f"trigger_action | get_history_detail_failed | id={record_id}, error={e}")
+
+    # 数据库无记录时降级到内存缓存
+    with _trigger_history_lock:
+        for rec in _trigger_history_cache:
+            if rec.get('id') == record_id:
+                return {'found': True, 'record': dict(rec)}
+    return {'found': False, 'record': None}
 
 
 def clear_trigger_history():

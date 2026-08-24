@@ -720,6 +720,18 @@ class TriggerActionHistoryDB:
         return records
 
     @staticmethod
+    def get_by_id(record_id):
+        """按 id 获取单条执行历史（含完整 output_tail/error_tail）"""
+        try:
+            with get_db_cursor() as cursor:
+                cursor.execute('SELECT * FROM trigger_action_history WHERE id = ?', (record_id,))
+                row = cursor.fetchone()
+                return dict(row) if row else None
+        except Exception as e:
+            app_logger.error(f"database | get_trigger_history_by_id_failed | id={record_id}, error={e}")
+            return None
+
+    @staticmethod
     def count():
         """获取执行历史总数"""
         try:

@@ -760,6 +760,15 @@ def register_routes(app):
             }
         })
 
+    @app.route('/api/trigger-actions/history/<int:record_id>', methods=['GET'])
+    def trigger_actions_history_detail_api(record_id):
+        """获取单条执行历史的完整日志（含完整 output_tail/error_tail）"""
+        from src.services.trigger_action import get_trigger_history_detail
+        result = get_trigger_history_detail(record_id)
+        if not result['found']:
+            return jsonify({'status': 'error', 'message': '记录不存在'}), 404
+        return jsonify({'status': 'success', 'record': result['record']})
+
     @app.route('/api/trigger-actions/trigger', methods=['POST'])
     def trigger_actions_manual_trigger_api():
         """手动触发 action"""
