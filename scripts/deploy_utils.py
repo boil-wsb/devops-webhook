@@ -555,7 +555,10 @@ def load_projectcode_status(projectcode, minio_config=None):
     # 1. 优先读本地
     if os.path.exists(local_path):
         with open(local_path, 'r', encoding='utf-8') as f:
-            return json.load(f)
+            status = json.load(f)
+        # 以当前配置刷新 expected_branches（配置改版后旧快照会导致首次打包永不完成）
+        _sync_expected_branches(status, projectcode, minio_config)
+        return status
 
     # 2. 读 MinIO
     if minio_config:
@@ -572,6 +575,8 @@ def load_projectcode_status(projectcode, minio_config=None):
                 status = json.load(f)
             # 缓存到本地
             os.replace(local_tmp, local_path)
+            # 以当前配置刷新 expected_branches（配置改版后旧快照会导致首次打包永不完成）
+            _sync_expected_branches(status, projectcode, minio_config)
             return status
         except Exception:
             pass  # MinIO 不存在则初始化
@@ -668,6 +673,75 @@ def collect_expected_branches(projectcode):
     except Exception as e:
         print(f"  警告: 收集期望分支失败: {e}")
         return []
+
+
+def _sync_expected_branches(status, projectcode, minio_config=None):
+    """以当前 trigger_actions.yaml 配置刷新 status 中的 expected_branches
+
+    expected_branches 是状态初始化时的快照；trigger_actions.yaml 改版
+    （分支改映射到其他 projectcode）后旧快照会导致"所有分支完成"条件
+    永远无法满足，首次打包永不触发。每次加载时比对并同步本地 + MinIO。
+
+    Args:
+        status: 状态 dict（会被原地修改）
+        projectcode: 项目代码
+        minio_config: MinIO 配置 dict
+
+    Returns:
+        bool: 期望分支是否发生变化
+    """
+    try:
+        current = collect_expected_branches(projectcode)
+    except Exception as e:
+        print(f"  警告: 刷新期望分支失败: {e}")
+        return False
+
+    # 配置读取异常时当前列表可能为空，禁止用空列表覆盖存量，避免破坏首次打包判定
+    if not current:
+        print(f"  警告: 当前配置未收集到 {projectcode} 的分支，跳过期望分支刷新")
+        return False
+
+    old = status.get('expected_branches') or []
+    if set(current) == set(old):
+        return False
+
+    status['expected_branches'] = current
+    print(f"  期望分支刷新: {sorted(old)} -> {sorted(current)}")
+    save_projectcode_status(projectcode, status, minio_config)
+    return True
+
+
+# 补触发首次打包的重入保护（按 projectcode 记录，防止 pack → load → pack 递归）
+_pack_trigger_in_progress = set()
+_pack_trigger_in_progress_lock = threading.Lock()
+
+
+def _maybe_trigger_first_pack(status, projectcode, minio_config=None):
+    """若所有期望分支均已完成而首次打包未完成，补触发首次打包
+
+    仅在 orchestrate 对账完成后调用（此时缺失产物已由对账补全），
+    保证 deploy.zip 不会因产物缺失而打包不全。
+
+    Args:
+        status: 状态 dict（对账后的最新状态）
+        projectcode: 项目代码
+        minio_config: MinIO 配置 dict
+    """
+    with _pack_trigger_in_progress_lock:
+        if projectcode in _pack_trigger_in_progress:
+            return
+        _pack_trigger_in_progress.add(projectcode)
+    try:
+        if status.get('first_pack_completed'):
+            return
+        expected = set(status.get('expected_branches') or [])
+        completed = set(status.get('completed_branches') or [])
+        if expected and expected.issubset(completed):
+            print(f"  projectcode={projectcode} 所有期望分支已完成，补触发首次打包")
+            pack_and_upload_deploy(projectcode, minio_config)
+    finally:
+        with _pack_trigger_in_progress_lock:
+            _pack_trigger_in_progress.discard(projectcode)
 
 
 def _get_branch_image_name(branch_images, branch):
@@ -984,6 +1058,13 @@ def _orchestrate_image_deploy_impl(image_full, projectcode, image_type, branch, 
         status = _reconcile_nexus_state(projectcode, branch, status)
         save_projectcode_status(projectcode, status, minio_config)
 
+        # 补触发首次打包：对账后若所有期望分支已完成（含缺失产物已补全），
+        # 先完成首次打包，避免后续步骤按首次模式处理新版本镜像
+        _maybe_trigger_first_pack(status, projectcode, minio_config)
+        # 首次打包可能刚被触发完成，重新加载以获取最新模式（first_pack_completed）
+        status = load_projectcode_status(projectcode, minio_config)
+        first_pack_completed = status.get('first_pack_completed', False)
+
     # 1.6 如果当前分支已在对账完成的列表中，验证产物文件存在性
     if branch in status.get('completed_branches', []):
         cached_image = _get_branch_image_name(status.get('branch_images', {}), branch)
@@ -991,15 +1072,26 @@ def _orchestrate_image_deploy_impl(image_full, projectcode, image_type, branch, 
         if not first_pack_completed and cached_image:
             cached_path = os.path.join(get_workorder_images_dir(), cached_image)
             if os.path.exists(cached_path) and os.path.exists(cached_path + '.md5'):
-                print(f"  当前分支 {branch} 已对账完成且产物存在，跳过下载")
-                return cached_image
-            print(f"  当前分支 {branch} 已标记完成但产物缺失，重新生成")
+                # 当前分支由 pipeline 触发（携带新版本镜像），不能因旧产物存在而跳过
+                # save/上传；清理旧产物，避免 images/ 累积多版本进 deploy.zip
+                print(f"  当前分支 {branch} 已有旧产物 {cached_image}，清理后重新 save 新版本")
+                for p in (cached_path, cached_path + '.md5'):
+                    try:
+                        os.remove(p)
+                    except OSError:
+                        pass
+            else:
+                print(f"  当前分支 {branch} 已标记完成但产物缺失，重新生成")
             # 从 completed_branches 中移除，让后续步骤重新 save
             status['completed_branches'] = [b for b in status.get('completed_branches', []) if b != branch]
+            # 持久化移除结果，确保 report_branch_completed 重载后能更新新的 image_name/image_full
+            save_projectcode_status(projectcode, status, minio_config)
         elif not cached_image:
             # 已标记完成但无产物文件名记录，需要重新生成
             print(f"  当前分支 {branch} 已标记完成但无产物记录，重新生成")
             status['completed_branches'] = [b for b in status.get('completed_branches', []) if b != branch]
+            # 持久化移除结果，确保 report_branch_completed 重载后能更新新的 image_name/image_full
+            save_projectcode_status(projectcode, status, minio_config)
         else:
             # P0 修复: 增量模式下不跳过 save，因为 pipeline 触发了新版本
             # 首次模式的跳过逻辑已在上面 if not first_pack_completed 分支处理
@@ -1109,6 +1201,13 @@ def _orchestrate_file_deploy_impl(local_file_path, projectcode, image_type, bran
         status = _reconcile_nexus_state(projectcode, branch, status)
         save_projectcode_status(projectcode, status, minio_config)
 
+        # 补触发首次打包：对账后若所有期望分支已完成（含缺失产物已补全），
+        # 先完成首次打包，避免后续步骤按首次模式处理新版本产物
+        _maybe_trigger_first_pack(status, projectcode, minio_config)
+        # 首次打包可能刚被触发完成，重新加载以获取最新模式（first_pack_completed）
+        status = load_projectcode_status(projectcode, minio_config)
+        first_pack_completed = status.get('first_pack_completed', False)
+
     # 1.6 如果当前分支已在对账完成的列表中，验证产物文件存在性
     if branch in status.get('completed_branches', []):
         cached_image = _get_branch_image_name(status.get('branch_images', {}), branch)
@@ -1117,15 +1216,21 @@ def _orchestrate_file_deploy_impl(local_file_path, projectcode, image_type, bran
             deploy_dir = get_workorder_deploy_dir()
             dist_dir = os.path.join(deploy_dir, 'nginx', 'dist')
             if os.path.isdir(dist_dir) and os.listdir(dist_dir):
-                print(f"  当前分支 {branch} 已对账完成且产物存在，跳过下载")
-                return cached_image
-            print(f"  当前分支 {branch} 已标记完成但产物缺失，重新生成")
+                # 当前分支由 pipeline 触发（携带新版本产物），不因旧产物存在而跳过，
+                # 后续步骤会清空 dist 并重新解压
+                print(f"  当前分支 {branch} 已有旧产物，继续重新解压新版本")
+            else:
+                print(f"  当前分支 {branch} 已标记完成但产物缺失，重新生成")
             # 从 completed_branches 中移除，让后续步骤重新处理
             status['completed_branches'] = [b for b in status.get('completed_branches', []) if b != branch]
+            # 持久化移除结果，确保 report_branch_completed 重载后能更新新的 image_name/image_full
+            save_projectcode_status(projectcode, status, minio_config)
         elif not cached_image:
             # 已标记完成但无产物文件名记录，需要重新生成
             print(f"  当前分支 {branch} 已标记完成但无产物记录，重新生成")
             status['completed_branches'] = [b for b in status.get('completed_branches', []) if b != branch]
+            # 持久化移除结果，确保 report_branch_completed 重载后能更新新的 image_name/image_full
+            save_projectcode_status(projectcode, status, minio_config)
         else:
             # P0 修复: 增量模式下不跳过处理，因为 pipeline 触发了新版本
             print(f"  当前分支 {branch} 已标记完成，增量模式继续处理新版本")
