@@ -173,6 +173,7 @@ def init_database():
                     project_name TEXT NOT NULL,
                     ref TEXT NOT NULL,
                     pipeline_iid INTEGER,
+                    projectcode TEXT DEFAULT '',
                     success INTEGER NOT NULL DEFAULT 0,
                     exit_code INTEGER,
                     start_time TEXT,
@@ -185,6 +186,12 @@ def init_database():
                     created_at TEXT DEFAULT (datetime('now', '+8 hours'))
                 )
             ''')
+
+            # 旧库迁移：为已存在的表补充 projectcode 列（重复执行会抛错，忽略即可）
+            try:
+                cursor.execute('ALTER TABLE trigger_action_history ADD COLUMN projectcode TEXT DEFAULT \'\'')
+            except Exception:
+                pass
 
             cursor.execute('''
                 CREATE INDEX IF NOT EXISTS idx_trigger_history_action_time
@@ -629,7 +636,7 @@ class TriggerActionHistoryDB:
     @staticmethod
     def insert(action_name, project_name, ref, pipeline_iid, success, exit_code,
                start_time, end_time, duration, output_tail, error_tail,
-               ssh_host='local', trigger_source='auto'):
+               ssh_host='local', trigger_source='auto', projectcode=''):
         """插入执行历史记录"""
         try:
             # 格式化时间为字符串
@@ -639,11 +646,11 @@ class TriggerActionHistoryDB:
             with get_db_cursor() as cursor:
                 cursor.execute('''
                     INSERT INTO trigger_action_history
-                    (action_name, project_name, ref, pipeline_iid, success, exit_code,
+                    (action_name, project_name, ref, pipeline_iid, projectcode, success, exit_code,
                      start_time, end_time, duration, output_tail, error_tail,
                      ssh_host, trigger_source)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                ''', (action_name, project_name, ref, pipeline_iid,
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ''', (action_name, project_name, ref, pipeline_iid, projectcode or '',
                       1 if success else 0, exit_code,
                       start_str, end_str, duration,
                       output_tail, error_tail, ssh_host, trigger_source))

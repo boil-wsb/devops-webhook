@@ -1196,6 +1196,7 @@
                             <th>Action</th>
                             <th>项目</th>
                             <th>分支</th>
+                            <th>ProjectCode</th>
                             <th>IID</th>
                             <th>状态</th>
                             <th>耗时(s)</th>
@@ -1208,7 +1209,7 @@
                     </thead>
                     <tbody id="historyBody">
                         <tr>
-                            <td colspan="11" class="empty-state">
+                            <td colspan="12" class="empty-state">
                                 <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
                                     <polyline points="23 4 23 10 17 10"></polyline>
                                     <path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"></path>
@@ -1426,7 +1427,12 @@
                     throw new Error(`HTTP ${response.status}`);
                 }
                 const data = await response.json();
+                actionsConfig = data.actions || [];
                 renderActions(data.actions || []);
+                // actions 配置就绪后，若历史已渲染则重渲当前页，保证 ProjectCode 列正确回显
+                if (historyRendered) {
+                    fetchHistory(currentPage, true);
+                }
             } catch (error) {
                 console.error('获取 Action 配置失败:', error);
                 renderActionsError(error.message);
@@ -1561,6 +1567,10 @@
         let currentPage = 1;
         const pageSize = 20;
         let lastHistorySignature = '';
+        // 已加载的 actions 配置（含 ref_projectcodes），用于历史记录回显 projectcode
+        let actionsConfig = [];
+        // 历史是否已渲染（用于 actions 配置就绪后兜底重渲，避免 projectcode 竞态缺失）
+        let historyRendered = false;
 
         async function fetchHistory(page = 1, force = false) {
             try {
@@ -1598,6 +1608,20 @@
             }
         }
 
+        // 获取记录的 projectcode：优先取入库时持久化的 record.projectcode（历史准确值），
+        // 旧记录（无该字段）回退到 actions 配置的 ref_projectcodes 关联
+        function getRecordProjectcode(record) {
+            if (record.projectcode) {
+                return record.projectcode;
+            }
+            const cleanRef = (record.ref || '').replace(/^refs\/(heads|tags|remotes)\//, '');
+            const action = actionsConfig.find(a => a.name === record.action_name);
+            if (action && action.ref_projectcodes && cleanRef in action.ref_projectcodes) {
+                return action.ref_projectcodes[cleanRef] || '';
+            }
+            return '';
+        }
+
         function renderHistory(history, pagination = null) {
             const tbody = document.getElementById('historyBody');
             const countEl = document.getElementById('historyCount');
@@ -1607,7 +1631,7 @@
                 countEl.textContent = pagination ? `共 ${pagination.total} 条` : '';
                 tbody.innerHTML = `
                     <tr>
-                        <td colspan="11" class="empty-state">
+                        <td colspan="12" class="empty-state">
                             <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
                                 <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
                                 <polyline points="14 2 14 8 20 8"></polyline>
@@ -1639,12 +1663,14 @@
                     : `<span class="source-badge source-auto">自动</span>`;
                 const iid = record.pipeline_iid || '-';
                 const location = record.ssh_host || 'local';
+                const projectcode = getRecordProjectcode(record);
 
                 return `
                     <tr class="${rowClass}" style="animation: slideUp 0.3s ease-out ${Math.min(index * 0.03, 0.3)}s backwards;">
                         <td><strong>${escapeHtml(record.action_name || '-')}</strong></td>
                         <td>${escapeHtml(record.project_name || '-')}</td>
                         <td class="mono">${escapeHtml(record.ref || '-')}</td>
+                        <td class="mono">${escapeHtml(projectcode || '-')}</td>
                         <td class="mono">${escapeHtml(iid)}</td>
                         <td>${statusBadge}</td>
                         <td class="mono">${formatDuration(record.duration)}</td>
@@ -1699,6 +1725,8 @@
             } else if (paginationEl) {
                 paginationEl.innerHTML = '';
             }
+
+            historyRendered = true;
         }
 
         function renderHistoryError(message) {
@@ -1708,7 +1736,7 @@
             if (paginationEl) paginationEl.innerHTML = '';
             tbody.innerHTML = `
                 <tr>
-                    <td colspan="11" class="empty-state" style="color: var(--error-600);">
+                    <td colspan="12" class="empty-state" style="color: var(--error-600);">
                         <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
                             <circle cx="12" cy="12" r="10"></circle>
                             <line x1="12" y1="8" x2="12" y2="12"></line>
@@ -1743,7 +1771,8 @@
             stopAutoRefresh();
             if (autoRefreshEnabled) {
                 autoRefreshTimer = setInterval(() => {
-                    fetchHistory();
+                    // 保持当前页刷新，避免把用户跳回第一页
+                    fetchHistory(currentPage);
                 }, 10000);
             }
         }
