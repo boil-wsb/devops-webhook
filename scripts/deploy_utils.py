@@ -783,13 +783,14 @@ def report_branch_completed(projectcode, branch, image_name, minio_config=None, 
 
     if branch not in status['completed_branches']:
         status['completed_branches'].append(branch)
-        # 记录分支与镜像信息的映射（image_name=产物文件名, image_full=原始镜像地址）
-        if 'branch_images' not in status:
-            status['branch_images'] = {}
-        status['branch_images'][branch] = {
-            'image_name': image_name,
-            'image_full': image_full or '',
-        }
+    # 每次上报都刷新分支与镜像信息的映射（image_name=产物文件名, image_full=原始镜像地址），
+    # 避免重复触发（分支已标记完成）时 branch_images 停留在旧版本，导致 compose 指向旧镜像
+    if 'branch_images' not in status:
+        status['branch_images'] = {}
+    status['branch_images'][branch] = {
+        'image_name': image_name,
+        'image_full': image_full or '',
+    }
 
     save_projectcode_status(projectcode, status, minio_config)
 
